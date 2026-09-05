@@ -4,6 +4,19 @@ export interface Attempt {
   endedAt: number | null
   startTimezone: string
   version: number
+  dailySmokingCostAtStart: number
+  finalSavedMoney: number | null
+}
+
+export interface TrackerSettings {
+  personalReason: string | null
+  dailySmokingCost: number
+  currency: 'EUR'
+}
+
+export interface TriggerInsight {
+  trigger: string
+  count: number
 }
 
 export interface TrackerState {
@@ -11,6 +24,8 @@ export interface TrackerState {
   activeAttempt: Attempt | null
   history: Attempt[]
   acknowledgedMilestones: number[]
+  settings: TrackerSettings
+  triggerInsight: TriggerInsight | null
 }
 
 export interface DailyWisdomState {
@@ -21,7 +36,7 @@ export interface DailyWisdomState {
   readAt: number | null
 }
 
-export const MILESTONES = [1, 3, 7, 14, 30, 50, 100, 180, 365]
+export const MILESTONES = [1, 3, 7, 14, 30, 60, 90, 180, 270, 365]
 
 export function elapsedParts(startedAt: number, now = Date.now()) {
   const elapsed = Math.max(0, now - startedAt)
@@ -34,6 +49,18 @@ export function milestonePercent(parts: ReturnType<typeof elapsedParts>, milesto
   if (milestoneDays <= 0) return 100
   const elapsedDays = parts.days + parts.hours / 24 + parts.minutes / 1_440
   return Math.min(100, (elapsedDays / milestoneDays) * 100)
+}
+
+export function elapsedMilliseconds(startedAt: number, endedAt = Date.now()) {
+  return Math.max(0, endedAt - startedAt)
+}
+
+export function savedMoney(startedAt: number, dailySmokingCost: number, endedAt = Date.now()) {
+  return elapsedMilliseconds(startedAt, endedAt) / 86_400_000 * Math.max(0, dailySmokingCost)
+}
+
+export function formatMoney(value: number, currency: 'EUR' = 'EUR') {
+  return new Intl.NumberFormat('uk-UA', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.max(0, value))
 }
 
 export function assertStartTime(startedAt: unknown): asserts startedAt is number {
