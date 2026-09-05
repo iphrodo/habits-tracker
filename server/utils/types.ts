@@ -30,6 +30,12 @@ export function elapsedParts(startedAt: number, now = Date.now()) {
   return { days, hours: Math.floor(remainder / 3_600_000), minutes: Math.floor((remainder % 3_600_000) / 60_000) }
 }
 
+export function milestonePercent(parts: ReturnType<typeof elapsedParts>, milestoneDays: number) {
+  if (milestoneDays <= 0) return 100
+  const elapsedDays = parts.days + parts.hours / 24 + parts.minutes / 1_440
+  return Math.min(100, (elapsedDays / milestoneDays) * 100)
+}
+
 export function assertStartTime(startedAt: unknown): asserts startedAt is number {
   if (typeof startedAt !== 'number' || !Number.isSafeInteger(startedAt) || startedAt <= 0 || startedAt > Date.now() + 2_000) {
     throw createError({ statusCode: 400, statusMessage: 'Оберіть коректну дату в минулому.' })

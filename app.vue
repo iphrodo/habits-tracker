@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Attempt, DailyWisdomState, TrackerState } from './server/utils/types'
-import { MILESTONES, elapsedParts } from './server/utils/types'
+import { MILESTONES, elapsedParts, milestonePercent } from './server/utils/types'
 import { NINJA_LEVELS, rankForDays } from './shared/ranks'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 
@@ -35,7 +35,7 @@ const active = computed(() => state.value?.activeAttempt || null)
 const progress = computed(() => active.value ? elapsedParts(active.value.startedAt, now.value) : null)
 const level = computed(() => rankForDays(progress.value?.days || 0))
 const nextMilestone = computed(() => MILESTONES.find((day) => day > (progress.value?.days || 0)) || null)
-const milestoneProgress = computed(() => nextMilestone.value ? Math.min(100, ((progress.value?.days || 0) / nextMilestone.value) * 100) : 100)
+const milestoneProgress = computed(() => progress.value && nextMilestone.value ? milestonePercent(progress.value, nextMilestone.value) : 100)
 const passedMilestones = computed(() => MILESTONES.filter((day) => day <= (progress.value?.days || 0)))
 const unacknowledged = computed(() => passedMilestones.value.filter((day) => !state.value?.acknowledgedMilestones.includes(day)))
 const pauseRemaining = computed(() => Math.max(0, Math.ceil(((pauseEndsAt.value || 0) - now.value) / 1000)))
