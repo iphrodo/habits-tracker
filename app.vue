@@ -476,7 +476,7 @@ onBeforeUnmount(() => {
           <p v-if="characterOpen" class="character-note">{{ level.note }}</p>
           <div class="counter">
             <strong>{{ progress.days }}</strong>
-            <span>{{ pluralDays(progress.days) }} без куріння</span>
+            <span>{{ pluralDays(progress.days) }} свободи</span>
           </div>
           <p class="subcounter">
             {{ String(progress.hours).padStart(2, '0') }} год {{ String(progress.minutes).padStart(2, '0') }} хв

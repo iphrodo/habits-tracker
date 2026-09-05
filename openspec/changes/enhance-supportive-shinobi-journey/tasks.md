@@ -44,6 +44,7 @@
 - [x] 6.3 Show the personal reason throughout first and second Chakra rounds and on «Як зараз?» without obscuring stage content.
 - [x] 6.4 Suppress the reason card cleanly when no reason exists and keep random wisdom behind the active craving overlay.
 - [ ] 6.5 Add component/behavior tests for Settings errors and the Chakra reason states.
+- [x] 6.6 Replace the primary «днів без куріння» counter label with the supportive «день/дні/днів свободи» wording and protect it with a regression test.
 
 ## 7. Accessibility and mobile resilience
 
