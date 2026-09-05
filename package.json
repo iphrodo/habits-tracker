@@ -1,0 +1,24 @@
+{
+  "name": "vilno-habit-tracker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "preview": "nuxt preview",
+    "typecheck": "nuxt typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "backup": "node scripts/backup.mjs"
+  },
+  "dependencies": {
+    "@vite-pwa/nuxt": "1.1.1",
+    "nuxt": "4.5.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.3",
+    "vitest": "5.0.0",
+    "vue-tsc": "^3.3.11"
+  }
+}
