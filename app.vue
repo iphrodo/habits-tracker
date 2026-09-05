@@ -1,123 +1,84 @@
 <script setup lang="ts">
 import type { Attempt, DailyWisdomState, TrackerState } from './server/utils/types'
-import { MILESTONES, elapsedParts, milestonePercent } from './server/utils/types'
+import { elapsedParts, formatMoney, MILESTONES, savedMoney } from './server/utils/types'
 import { NINJA_LEVELS, rankForDays } from './shared/ranks'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 
 type Tab = 'today' | 'milestones' | 'settings'
-
-const tab = ref<Tab>('today')
-const state = ref<TrackerState | null>(null)
-const wisdom = ref<DailyWisdomState | null>(null)
-const loading = ref(true)
-const offline = ref(!navigator.onLine)
-const wisdomError = ref('')
-const startDialog = ref(false)
-const editDialog = ref(false)
-const restartDialog = ref(false)
-const deleteHistoryAttempt = ref<Attempt | null>(null)
-const characterOpen = ref(false)
-const scrollOpen = ref(false)
-const celebration = ref('')
-const pauseEndsAt = ref<number | null>(null)
-const now = ref(Date.now())
-const formDate = ref('')
-const formTime = ref('')
-const formError = ref('')
-const saving = ref(false)
-const characterImageError = ref(false)
-let timer: ReturnType<typeof setInterval> | undefined
-let refreshTimer: ReturnType<typeof setInterval> | undefined
-let wisdomRefreshTimer: ReturnType<typeof setInterval> | undefined
-const { needRefresh, updateServiceWorker } = useRegisterSW()
-
-const active = computed(() => state.value?.activeAttempt || null)
-const progress = computed(() => active.value ? elapsedParts(active.value.startedAt, now.value) : null)
-const level = computed(() => rankForDays(progress.value?.days || 0))
-const nextMilestone = computed(() => MILESTONES.find((day) => day > (progress.value?.days || 0)) || null)
-const milestoneProgress = computed(() => progress.value && nextMilestone.value ? milestonePercent(progress.value, nextMilestone.value) : 100)
-const passedMilestones = computed(() => MILESTONES.filter((day) => day <= (progress.value?.days || 0)))
-const unacknowledged = computed(() => passedMilestones.value.filter((day) => !state.value?.acknowledgedMilestones.includes(day)))
-const pauseRemaining = computed(() => Math.max(0, Math.ceil(((pauseEndsAt.value || 0) - now.value) / 1000)))
-const pauseDone = computed(() => pauseEndsAt.value !== null && pauseRemaining.value === 0)
-
+type Dialog = 'start' | 'edit' | 'new-path' | null
+type Trigger = 'stress' | 'coffee' | 'alcohol' | 'after_food' | 'company' | 'boredom' | 'habit' | 'other'
+const triggerLabels: Record<Trigger, string> = { stress: 'Стрес', coffee: 'Кава', alcohol: 'Алкоголь', after_food: 'Після їжі', company: 'Компанія', boredom: 'Нудьга', habit: 'Звичка', other: 'Інше' }
+const reasonSuggestions = ['Хочу перестати залежати', 'Заради здоров’я', 'Заради сім’ї', 'Хочу краще себе почувати', 'Не хочу витрачати гроші', 'Хочу більше контролю над своїм життям']
+const tab = ref<Tab>('today'); const state = ref<TrackerState | null>(null); const wisdom = ref<DailyWisdomState | null>(null); const loading = ref(true); const offline = ref(!navigator.onLine); const error = ref(''); const loadError = ref(''); const wisdomError = ref(''); const saving = ref(false)
+const dialog = ref<Dialog>(null); const deleteHistoryAttempt = ref<Attempt | null>(null); const scrollOpen = ref(false); const characterOpen = ref(false); const now = ref(Date.now()); const formDate = ref(''); const formTime = ref(''); const selectedTrigger = ref<Trigger | undefined>(); const reasonDraft = ref(''); const costDraft = ref('7')
+const chakraEndsAt = ref<number | null>(null); const chakraRound = ref(0); const chakraStage = ref<'running' | 'checkin' | 'trigger'>('running')
+const { needRefresh, updateServiceWorker } = useRegisterSW(); let timer: ReturnType<typeof setInterval> | undefined; let loadingRequest: Promise<void> | undefined
+const active = computed(() => state.value?.activeAttempt || null); const progress = computed(() => active.value ? elapsedParts(active.value.startedAt, now.value) : null); const level = computed(() => rankForDays(progress.value?.days || 0)); const nextMilestone = computed(() => MILESTONES.find(day => day > (progress.value?.days || 0)) || null)
+const milestoneProgress = computed(() => { if (!progress.value || !nextMilestone.value) return 100; return Math.min(100, ((progress.value.days + progress.value.hours / 24 + progress.value.minutes / 1440) / nextMilestone.value) * 100) })
+const currentSaved = computed(() => active.value && state.value ? savedMoney(active.value.startedAt, active.value.dailySmokingCostAtStart, now.value) : 0)
+const historySaved = computed(() => (state.value?.history || []).reduce((sum, item) => sum + (item.finalSavedMoney ?? 0), 0)); const totalSaved = computed(() => historySaved.value + currentSaved.value)
+const totalElapsed = computed(() => (state.value?.history || []).reduce((sum, item) => sum + Math.max(0, (item.endedAt || item.startedAt) - item.startedAt), 0) + (active.value ? Math.max(0, now.value - active.value.startedAt) : 0)); const totalParts = computed(() => elapsedParts(0, totalElapsed.value)); const longest = computed(() => Math.max(0, ...(state.value?.history || []).map(item => Math.floor(Math.max(0, (item.endedAt || item.startedAt) - item.startedAt) / 86_400_000)), progress.value?.days || 0))
+const chakraRemaining = computed(() => Math.max(0, Math.ceil(((chakraEndsAt.value || 0) - now.value) / 1000))); const chakraText = computed(() => { const elapsed = 60 - chakraRemaining.value; const messages = chakraRound.value ? ['Не поспішай нічого вирішувати.', 'Дозволь відчуттю бути тут, не виконуючи його.', 'Ця хвиля зміниться. Тобі не потрібно йти за нею.'] : ['Не треба боротися з бажанням. Просто поміть його.', 'Повільний вдих. Ще повільніший видих.', 'Бажання — це сигнал, а не команда.']; return messages[Math.min(2, Math.floor(elapsed / 20))] })
 function pluralDays(days: number) { const last = days % 10; const hundred = days % 100; return hundred >= 11 && hundred <= 14 ? 'днів' : last === 1 ? 'день' : last >= 2 && last <= 4 ? 'дні' : 'днів' }
-function localInput(timestamp: number) { const date = new Date(timestamp); return { date: date.toISOString().slice(0, 10), time: date.toTimeString().slice(0, 5) } }
-function timezone() { return Intl.DateTimeFormat().resolvedOptions().timeZone }
-function requestId() { return crypto.randomUUID() }
 function formatDate(timestamp: number) { return new Intl.DateTimeFormat('uk-UA', { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp) }
-
-async function loadWisdom() {
-  try { wisdom.value = await $fetch<DailyWisdomState>('/api/wisdom/today', { query: { timezone: timezone() }, timeout: 8_000 }); wisdomError.value = '' }
-  catch { wisdomError.value = 'Не вдалося оновити слова дня. Спробуй ще раз, коли буде зв’язок.' }
-}
-async function load() {
-  loading.value = true
-  try { const [tracker] = await Promise.all([$fetch<TrackerState>('/api/tracker', { timeout: 8_000 }), loadWisdom()]); state.value = tracker; offline.value = false; queueCelebration() }
-  catch { offline.value = true }
-  finally { loading.value = false }
-}
-function openStart(edit = false) { formError.value = ''; const input = localInput(edit && active.value ? active.value.startedAt : Date.now()); formDate.value = input.date; formTime.value = input.time; if (edit) editDialog.value = true; else startDialog.value = true }
-function startTimestamp() { return new Date(`${formDate.value}T${formTime.value}`).getTime() }
-async function saveStart() {
-  const startedAt = startTimestamp(); formError.value = ''
-  if (!Number.isFinite(startedAt) || startedAt > Date.now() + 2_000) { formError.value = 'Оберіть момент у минулому.'; return }
-  saving.value = true
-  try { state.value = active.value ? await $fetch<TrackerState>(`/api/attempts/${active.value.id}`, { method: 'PATCH', body: { startedAt, timezone: timezone(), version: active.value.version, requestId: requestId() } }) : await $fetch<TrackerState>('/api/attempts', { method: 'POST', body: { startedAt, timezone: timezone(), requestId: requestId() } }); startDialog.value = false; editDialog.value = false; queueCelebration() }
-  catch (error: any) { formError.value = error?.data?.statusMessage || 'Не вдалося зберегти. Спробуй ще раз.' }
-  finally { saving.value = false }
-}
-async function restart() { saving.value = true; try { state.value = await $fetch<TrackerState>('/api/attempts/restart', { method: 'POST', body: { requestId: requestId() } }); restartDialog.value = false; await loadWisdom() } catch (error: any) { formError.value = error?.data?.statusMessage || 'Не вдалося почати нову спробу.' } finally { saving.value = false } }
-async function deleteSelectedHistoryAttempt() { if (!deleteHistoryAttempt.value) return; saving.value = true; try { state.value = await $fetch<TrackerState>(`/api/attempts/${deleteHistoryAttempt.value.id}`, { method: 'DELETE', body: { requestId: requestId() } }); deleteHistoryAttempt.value = null } catch (error: any) { formError.value = error?.data?.statusMessage || 'Не вдалося видалити спробу.' } finally { saving.value = false } }
-async function markWisdomRead() { if (!wisdom.value) return; saving.value = true; try { wisdom.value = await $fetch<DailyWisdomState>('/api/wisdom/read', { method: 'POST', body: { date: wisdom.value.date, wisdomId: wisdom.value.wisdom.id, timezone: timezone(), requestId: requestId() } }); wisdomError.value = '' } catch { wisdomError.value = 'Не вдалося зберегти печатку. Повтори, коли буде зв’язок.' } finally { saving.value = false } }
-async function queueCelebration() { if (!unacknowledged.value.length || !state.value) return; const latest = Math.max(...unacknowledged.value); try { state.value = await $fetch<TrackerState>('/api/milestones/acknowledge', { method: 'POST', body: { days: unacknowledged.value, requestId: requestId() } }); celebration.value = `Новий рівень: ${NINJA_LEVELS.find((item) => item.day === latest)?.name || `${latest} ${pluralDays(latest)}`}`; characterOpen.value = true } catch { /* progress remains visible */ } }
-watch(() => level.value.art, () => { characterImageError.value = false })
-function beginPause() { pauseEndsAt.value = Date.now() + 60_000 }
-function closePause() { pauseEndsAt.value = null }
-onMounted(() => { load(); timer = setInterval(() => { now.value = Date.now() }, 1_000); refreshTimer = setInterval(load, 300_000); wisdomRefreshTimer = setInterval(loadWisdom, 60_000); window.addEventListener('online', load); window.addEventListener('offline', () => offline.value = true); document.addEventListener('visibilitychange', () => { if (!document.hidden) load() }) })
-onBeforeUnmount(() => { if (timer) clearInterval(timer); if (refreshTimer) clearInterval(refreshTimer); if (wisdomRefreshTimer) clearInterval(wisdomRefreshTimer) })
+function formatPeriod(milliseconds: number) { const p = elapsedParts(0, milliseconds); return `${p.days} ${pluralDays(p.days)} ${p.hours ? `${p.hours} год` : ''}`.trim() }
+function timezone() { return Intl.DateTimeFormat().resolvedOptions().timeZone }; function requestId() { return crypto.randomUUID() }
+function setForm(timestamp: number) { const d = new Date(timestamp); formDate.value = d.toISOString().slice(0, 10); formTime.value = d.toTimeString().slice(0, 5); selectedTrigger.value = undefined }
+function timestamp() { return new Date(`${formDate.value}T${formTime.value}`).getTime() }
+async function loadWisdom() { try { wisdom.value = await $fetch('/api/wisdom/today', { query: { timezone: timezone() }, timeout: 8_000 }) as DailyWisdomState; wisdomError.value = '' } catch { wisdomError.value = 'Слова дня тимчасово недоступні.' } }
+async function refreshTracker() { const initialLoad = !state.value; if (initialLoad) loading.value = true; now.value = Date.now(); try { const tracker = await $fetch<TrackerState>('/api/tracker', { timeout: 8_000 }); state.value = tracker; reasonDraft.value = tracker.settings.personalReason || ''; costDraft.value = String(tracker.settings.dailySmokingCost); offline.value = false; loadError.value = ''; void loadWisdom() } catch (cause: any) { offline.value = !navigator.onLine; loadError.value = cause?.data?.statusMessage || (offline.value ? 'Немає з’єднання з інтернетом.' : 'Сервер тимчасово не відповідає. Спробуй ще раз.') } finally { if (initialLoad) loading.value = false } }
+async function load() { if (!loadingRequest) loadingRequest = refreshTracker().finally(() => { loadingRequest = undefined }); return loadingRequest }
+function openDialog(kind: Exclude<Dialog, null>) { error.value = ''; setForm(kind === 'edit' && active.value ? active.value.startedAt : Date.now()); dialog.value = kind }
+async function saveStart() { const startedAt = timestamp(); if (!Number.isFinite(startedAt) || startedAt > Date.now() + 2000) { error.value = 'Оберіть момент у минулому.'; return }; saving.value = true; try { state.value = active.value ? await $fetch(`/api/attempts/${active.value.id}`, { method: 'PATCH', body: { startedAt, timezone: timezone(), version: active.value.version, requestId: requestId() } }) as TrackerState : await $fetch('/api/attempts', { method: 'POST', body: { startedAt, timezone: timezone(), requestId: requestId() } }) as TrackerState; dialog.value = null } catch (e: any) { error.value = e?.data?.statusMessage || 'Не вдалося зберегти.' } finally { saving.value = false } }
+async function saveNewPath() { if (!active.value) return; const startedAt = timestamp(); saving.value = true; try { state.value = await $fetch('/api/attempts/new-path', { method: 'POST', body: { startedAt, timezone: timezone(), version: active.value.version, trigger: selectedTrigger.value, rankKey: level.value.name, requestId: requestId() } }) as TrackerState; dialog.value = null } catch (e: any) { error.value = e?.data?.statusMessage || 'Не вдалося зберегти момент.' } finally { saving.value = false } }
+async function saveSettings() { const cost = Number(costDraft.value.replace(',', '.')); saving.value = true; try { state.value = await $fetch('/api/settings', { method: 'PATCH', body: { personalReason: reasonDraft.value || null, dailySmokingCost: cost, requestId: requestId() } }) as TrackerState; error.value = '' } catch (e: any) { error.value = e?.data?.statusMessage || 'Не вдалося зберегти налаштування.' } finally { saving.value = false } }
+async function markWisdomRead() { if (!wisdom.value) return; try { wisdom.value = await $fetch('/api/wisdom/read', { method: 'POST', body: { date: wisdom.value.date, wisdomId: wisdom.value.wisdom.id, timezone: timezone(), requestId: requestId() } }) as DailyWisdomState } catch { error.value = 'Не вдалося зберегти відмітку.' } }
+function startChakra(round = 0) { chakraRound.value = round; chakraStage.value = 'running'; chakraEndsAt.value = Date.now() + 60_000 }
+async function recordTrigger(trigger: Trigger | undefined) { if (trigger) { try { state.value = await $fetch('/api/cravings', { method: 'POST', body: { trigger, rankKey: level.value.name, requestId: requestId() } }) as TrackerState } catch { error.value = 'Не вдалося зберегти тригер.' } }; chakraEndsAt.value = null }
+async function deleteHistory() { if (!deleteHistoryAttempt.value) return; saving.value = true; try { state.value = await $fetch(`/api/attempts/${deleteHistoryAttempt.value.id}`, { method: 'DELETE', body: { requestId: requestId() } }) as TrackerState; deleteHistoryAttempt.value = null } finally { saving.value = false } }
+function refreshWhenVisible() { if (!document.hidden) void load() }; function refreshWhenFocused() { void load() }; function markOffline() { offline.value = true }
+onMounted(() => { void load(); timer = setInterval(() => { now.value = Date.now(); if (chakraEndsAt.value && chakraRemaining.value === 0 && chakraStage.value === 'running') chakraStage.value = 'checkin' }, 1000); document.addEventListener('visibilitychange', refreshWhenVisible); window.addEventListener('focus', refreshWhenFocused); window.addEventListener('online', refreshWhenFocused); window.addEventListener('offline', markOffline) }); onBeforeUnmount(() => { if (timer) clearInterval(timer); document.removeEventListener('visibilitychange', refreshWhenVisible); window.removeEventListener('focus', refreshWhenFocused); window.removeEventListener('online', refreshWhenFocused); window.removeEventListener('offline', markOffline) })
 </script>
 
 <template>
   <main class="app-shell">
-    <div v-if="offline" class="offline" role="status">Немає зв’язку. Дані оновляться, щойно ти знову будеш онлайн.</div>
-    <div v-if="needRefresh && !startDialog && !editDialog && pauseEndsAt === null" class="update-banner" role="status"><span>Доступне оновлення.</span><button @click="updateServiceWorker(true)">Оновити</button><button @click="needRefresh = false">Пізніше</button></div>
+    <div v-if="offline" class="offline" role="status">Немає зв’язку. Дані оновляться, коли він з’явиться.</div>
+    <div v-if="needRefresh" class="update-banner" role="status">Доступне оновлення <button @click="updateServiceWorker(true)">Оновити</button></div>
     <section v-if="loading" class="center-state"><span class="loading-mark">忍</span><p>Завантажуємо твій шлях…</p></section>
-    <section v-else-if="!state" class="center-state"><span class="loading-mark">忍</span><p>Не вдалося завантажити трекер.</p><button class="primary" @click="load">Спробувати ще раз</button></section>
-    <template v-else>
-      <header class="topbar"><div><p class="eyebrow">ВІЛЬНО · 忍道</p><h1>{{ tab === 'today' ? 'Твій шлях шинобі' : tab === 'milestones' ? 'Ранги шляху' : 'Налаштування' }}</h1></div><span class="status-dot" :class="{ online: !offline }" :aria-label="offline ? 'Офлайн' : 'Онлайн'"></span></header>
+    <template v-else-if="state">
+      <header class="topbar"><div><p class="eyebrow">ВІЛЬНО · 忍道</p><h1>{{ tab === 'today' ? 'Твій шлях шинобі' : tab === 'milestones' ? 'Ранги шляху' : 'Налаштування' }}</h1></div><span class="status-dot" :class="{ online: !offline }" :aria-label="offline ? 'Офлайн' : 'Онлайн'" /></header>
       <section v-if="tab === 'today'" class="today">
         <template v-if="active && progress">
           <div class="rank-label"><span>{{ level.japanese }}</span><strong>{{ level.name }}</strong></div>
-          <button class="character" :class="`character-${level.art}`" type="button" :aria-expanded="characterOpen" :aria-label="`Рівень: ${level.name}, розфарбовано на ${Math.round(milestoneProgress)} відсотків`" @click="characterOpen = !characterOpen"><span v-if="!characterImageError" :key="level.art" class="character-art" aria-hidden="true"><img class="character-outline" :src="`/characters/naruto-${level.art}.png?v=2`" alt="" width="1024" height="1536" @error="characterImageError = true"><span class="character-color" :style="{ clipPath: `inset(${100 - milestoneProgress}% 0 0 0)` }"><img :src="`/characters/naruto-${level.art}.png?v=2`" alt="" width="1024" height="1536"></span></span><span v-else class="character-fallback" aria-hidden="true">忍</span></button>
-          <p v-if="characterOpen" class="character-note" role="status">{{ celebration || level.note }}</p>
-          <div class="counter"><strong>{{ progress.days }}</strong><span>{{ pluralDays(progress.days) }} без куріння</span></div>
-          <p class="subcounter">{{ String(progress.hours).padStart(2, '0') }} год {{ String(progress.minutes).padStart(2, '0') }} хв</p>
-          <div class="milestone-card"><div class="row"><span v-if="nextMilestone">До {{ nextMilestone }} {{ pluralDays(nextMilestone) }}</span><span v-else>Ти пройшов усі ранги</span><strong>{{ Math.round(milestoneProgress) }}%</strong></div><div class="progress"><span :style="{ width: `${milestoneProgress}%` }"></span></div></div>
-          <article v-if="wisdom" class="wisdom-card" :class="{ open: scrollOpen }"><button class="scroll-head" type="button" :aria-expanded="scrollOpen" @click="scrollOpen = !scrollOpen"><span>今日の言葉</span><strong>Слова на сьогодні</strong><i>{{ scrollOpen ? '−' : '+' }}</i></button><div v-if="scrollOpen" class="scroll-body"><p class="wisdom-japanese">{{ wisdom.wisdom.japanese }}</p><p class="romaji">{{ wisdom.wisdom.romaji }}</p><p class="translation">{{ wisdom.wisdom.translation }}</p><p class="reflection">{{ wisdom.wisdom.reflection }}</p><a :href="wisdom.wisdom.source" target="_blank" rel="noreferrer">{{ wisdom.wisdom.sourceLabel }}</a><button v-if="!wisdom.readAt" class="stamp-button" :disabled="saving" @click="markWisdomRead">Прочитано <span>読</span></button><p v-else class="read-stamp" aria-label="Картку прочитано">読 · Прочитано</p></div></article>
-          <p v-else-if="wisdomError" class="wisdom-error">{{ wisdomError }}</p>
-          <button class="primary breath" type="button" @click="beginPause">Концентрація чакри <span>60 с</span></button><p class="started">Початок: {{ formatDate(active.startedAt) }}</p>
+          <button class="character" type="button" :aria-expanded="characterOpen" :aria-label="`Поточний ранг: ${level.name}`" @click="characterOpen = !characterOpen"><img :src="`/characters/naruto-${level.art}.png?v=2`" alt="" width="1024" height="1536"><span class="character-color" :style="{ clipPath: `inset(${100 - milestoneProgress}% 0 0 0)` }"><img :src="`/characters/naruto-${level.art}.png?v=2`" alt="" width="1024" height="1536"></span></button>
+          <p v-if="characterOpen" class="character-note">{{ level.note }}</p>
+          <div class="counter"><strong>{{ progress.days }}</strong><span>{{ pluralDays(progress.days) }} без куріння</span></div><p class="subcounter">{{ String(progress.hours).padStart(2, '0') }} год {{ String(progress.minutes).padStart(2, '0') }} хв</p>
+          <article class="money-card"><span>Залишилося в тебе</span><strong>{{ formatMoney(currentSaved) }}</strong></article>
+          <div class="milestone-card"><div class="row"><span v-if="nextMilestone">До {{ nextMilestone }} {{ pluralDays(nextMilestone) }}</span><span v-else>Твій шлях триває</span><strong>{{ Math.round(milestoneProgress) }}%</strong></div><div class="progress"><span :style="{ width: `${milestoneProgress}%` }" /></div></div>
+          <article v-if="state.settings.personalReason" class="reason-card"><span>Твоя причина</span><strong>{{ state.settings.personalReason }}</strong></article>
+          <article v-if="state.triggerInsight" class="insight">Останнім часом бажання найчастіше виникало: {{ triggerLabels[state.triggerInsight.trigger as Trigger] }}.</article>
+          <button class="primary breath" @click="startChakra()">Концентрація чакри <span>60 с</span></button>
+          <article v-if="wisdom" class="wisdom-card" :class="{ open: scrollOpen }"><button class="scroll-head" :aria-expanded="scrollOpen" @click="scrollOpen = !scrollOpen"><span>今日の言葉 · {{ wisdom.wisdom.category }}</span><strong>Слова на сьогодні</strong><i>{{ scrollOpen ? '−' : '+' }}</i></button><div v-if="scrollOpen" class="scroll-body"><p class="wisdom-japanese">{{ wisdom.wisdom.japanese }}</p><p class="romaji">{{ wisdom.wisdom.romaji }}</p><p class="translation">{{ wisdom.wisdom.translation }}</p><p class="reflection">{{ wisdom.wisdom.reflection }}</p><p v-if="wisdom.wisdom.practice" class="practice">{{ wisdom.wisdom.practice }}</p><button v-if="!wisdom.readAt" class="stamp-button" @click="markWisdomRead">Прочитано <span>読</span></button><p v-else class="read-stamp">読 · Прочитано</p></div></article><p v-else-if="wisdomError" class="wisdom-error">{{ wisdomError }}</p>
         </template>
-        <section v-else class="onboarding"><span class="loading-mark">忍</span><h2>Почни свій шлях</h2><p>Відміть момент, з якого ти не куриш. Ми подбаємо про точний відлік.</p><button class="primary" @click="openStart()">Почати зараз</button><button class="quiet" @click="openStart()">Вказати дату й час</button></section>
+        <section v-else class="onboarding"><span class="loading-mark">忍</span><h2>Почни свій шлях</h2><p>Відміть момент, з якого ти не куриш. Ми подбаємо про точний відлік.</p><button class="primary" @click="openDialog('start')">Почати зараз</button><button class="quiet" @click="openDialog('start')">Вказати дату й час</button></section>
       </section>
-      <section v-else-if="tab === 'milestones'" class="milestones"><p class="support">Шкала поєднує ранги, статуси та авторські етапи твого шляху.</p><div class="rank-grid"><button v-for="item in NINJA_LEVELS" :key="item.day" :class="{ earned: (progress?.days || 0) >= item.day }" :aria-label="`${item.name}, ${item.day} ${pluralDays(item.day)}`"><span>{{ item.japanese }}</span><strong>{{ item.name }}</strong><small>{{ item.day === 0 ? 'Початок' : `${item.day} ${pluralDays(item.day)}` }}</small></button></div></section>
-      <section v-else class="settings"><button v-if="active" class="setting" @click="openStart(true)"><span>Початок відліку</span><strong>{{ formatDate(active.startedAt) }}</strong></button><article class="install"><h2>Додай на екран iPhone</h2><p>У Safari натисни «Поширити», потім «На початковий екран».</p></article><article v-if="state.history.length" class="history"><h2>Попередні спроби</h2><div v-for="attempt in state.history" :key="attempt.id" class="history-item"><p>{{ formatDate(attempt.startedAt) }} — {{ attempt.endedAt ? formatDate(attempt.endedAt) : '' }}</p><button class="quiet" @click="deleteHistoryAttempt = attempt">Видалити</button></div></article><button v-if="active" class="danger" @click="restartDialog = true">Почати нову спробу</button></section>
+      <section v-else-if="tab === 'milestones'" class="milestones"><p class="support">Нові етапи ближчі на початку. Далі шлях просто стає твоїм життям.</p><div class="rank-grid"><button v-for="item in NINJA_LEVELS" :key="item.day" :class="{ earned: (progress?.days || 0) >= item.day }"><span>{{ item.japanese }}</span><strong>{{ item.name }}</strong><small>{{ item.day === 0 ? 'Початок' : `${item.day} ${pluralDays(item.day)}` }}</small><em>{{ item.note }}</em></button></div></section>
+      <section v-else class="settings">
+        <button v-if="active" class="setting" @click="openDialog('edit')"><span>Початок відліку</span><strong>{{ formatDate(active.startedAt) }}</strong></button>
+        <article class="settings-card"><label>Чому я хочу бути вільним від куріння?<textarea v-model="reasonDraft" maxlength="280" placeholder="Необов’язково" /></label><div class="chips"><button v-for="reason in reasonSuggestions" :key="reason" type="button" @click="reasonDraft = reason">{{ reason }}</button></div><label>Раніше на куріння за день<input v-model="costDraft" inputmode="decimal" aria-label="Денна вартість куріння"></label><p>Використовуємо цю суму для приблизного розрахунку економії.</p><button class="primary" :disabled="saving" @click="saveSettings">Зберегти</button></article>
+        <article class="history"><h2>Історія шляху</h2><div class="journey-total"><span>Усього часу без куріння</span><strong>{{ totalParts.days }} {{ pluralDays(totalParts.days) }} {{ totalParts.hours }} год</strong><span>Усього залишилося в тебе</span><strong>{{ formatMoney(totalSaved) }}</strong><small>Найдовший пройдений відрізок: {{ longest }} {{ pluralDays(longest) }}</small></div><div v-for="attempt in state.history" :key="attempt.id" class="history-item"><p><strong>{{ formatPeriod((attempt.endedAt || attempt.startedAt) - attempt.startedAt) }}</strong><br>{{ formatDate(attempt.startedAt) }} — {{ attempt.endedAt ? formatDate(attempt.endedAt) : '' }}<br>{{ formatMoney(attempt.finalSavedMoney || 0) }} зекономлено</p><button class="quiet" @click="deleteHistoryAttempt = attempt">Видалити запис</button></div></article>
+        <article class="install"><h2>Додай на екран iPhone</h2><p>У Safari натисни «Поширити», потім «На початковий екран».</p></article><button v-if="active" class="quiet new-path" @click="openDialog('new-path')">Зафіксувати нову сигарету</button>
+      </section>
       <nav aria-label="Основна навігація"><button :class="{ selected: tab === 'today' }" @click="tab = 'today'">Сьогодні</button><button :class="{ selected: tab === 'milestones' }" @click="tab = 'milestones'">Ранги</button><button :class="{ selected: tab === 'settings' }" @click="tab = 'settings'">Налаштування</button></nav>
     </template>
-    <div v-if="pauseEndsAt !== null" class="modal pause" role="dialog" aria-modal="true"><div class="modal-card"><span class="chakra">螺旋丸</span><p v-if="!pauseDone" class="pause-number">{{ pauseRemaining }}</p><h2>{{ pauseDone ? 'Ти впорався з цією хвилиною.' : 'Збери свою чакру' }}</h2><p>{{ pauseDone ? 'Наступний момент — теж твій.' : 'Повільний вдих. Ти не мусиш нічого вирішувати зараз.' }}</p><button class="quiet" @click="closePause">{{ pauseDone ? 'Повернутися' : 'Вийти з паузи' }}</button></div></div>
-    <div v-if="startDialog || editDialog" class="modal" role="dialog" aria-modal="true"><form class="modal-card" @submit.prevent="saveStart"><h2>{{ editDialog ? 'Виправити початок' : 'Почати відлік' }}</h2><p>Часовий пояс: {{ timezone() }}</p><label>Дата<input v-model="formDate" type="date" required></label><label>Час<input v-model="formTime" type="time" required></label><p v-if="formError" class="error">{{ formError }}</p><button class="primary" :disabled="saving">Підтвердити</button><button class="quiet" type="button" @click="startDialog = false; editDialog = false">Скасувати</button></form></div>
-    <div v-if="restartDialog" class="modal" role="dialog" aria-modal="true"><section class="modal-card"><h2>Почати знову?</h2><p>Поточна спроба залишиться в історії. Новий відлік почнеться з Академії.</p><p v-if="formError" class="error">{{ formError }}</p><button class="danger" :disabled="saving" @click="restart">Почати нову спробу</button><button class="quiet" @click="restartDialog = false">Скасувати</button></section></div>
-    <div v-if="deleteHistoryAttempt" class="modal" role="dialog" aria-modal="true"><section class="modal-card"><h2>Видалити цю спробу?</h2><p>Буде видалено лише запис від {{ formatDate(deleteHistoryAttempt.startedAt) }}. Поточний відлік не зміниться.</p><p v-if="formError" class="error">{{ formError }}</p><button class="danger" :disabled="saving" @click="deleteSelectedHistoryAttempt">Видалити спробу</button><button class="quiet" @click="deleteHistoryAttempt = null">Скасувати</button></section></div>
+    <section v-else class="center-state"><p>{{ loadError || 'Не вдалося завантажити трекер.' }}</p><button class="primary" @click="load">Спробувати ще раз</button></section>
+    <div v-if="chakraEndsAt !== null" class="modal pause" role="dialog" aria-modal="true"><section class="modal-card"><span class="chakra">螺旋丸</span><template v-if="chakraStage === 'running'"><p class="pause-number">{{ chakraRemaining }}</p><h2>Концентрація чакри</h2><p>{{ chakraText }}</p><button class="quiet" @click="chakraEndsAt = null">Повернутися</button></template><template v-else-if="chakraStage === 'checkin'"><h2>Як зараз?</h2><button class="primary" @click="chakraStage = 'trigger'">Вже легше</button><button class="quiet" @click="startChakra(1)">Ще 60 секунд</button><button class="quiet" @click="chakraStage = 'trigger'">Випити води</button><button class="quiet" @click="chakraStage = 'trigger'">Пройтися</button></template><template v-else><h2>Що викликало бажання?</h2><p v-if="state?.settings.personalReason" class="reason-card">{{ state.settings.personalReason }}</p><div class="chips"><button v-for="(label, key) in triggerLabels" :key="key" @click="recordTrigger(key as Trigger)">{{ label }}</button></div><button class="quiet" @click="recordTrigger(undefined)">Пропустити</button></template></section></div>
+    <div v-if="dialog" class="modal" role="dialog" aria-modal="true"><form class="modal-card" @submit.prevent="dialog === 'new-path' ? saveNewPath() : saveStart()"><h2>{{ dialog === 'edit' ? 'Виправити початок' : dialog === 'new-path' ? 'Ця сигарета не стирає пройдений шлях.' : 'Почати відлік' }}</h2><p>{{ dialog === 'new-path' ? 'Зафіксуй момент і виріши, що робити далі. Попередній період залишиться в історії.' : `Часовий пояс: ${timezone()}` }}</p><label>Дата<input v-model="formDate" type="date" required></label><label>Час<input v-model="formTime" type="time" required></label><div v-if="dialog === 'new-path'" class="chips"><button v-for="(label, key) in triggerLabels" :key="key" type="button" :class="{ selected: selectedTrigger === key }" @click="selectedTrigger = key as Trigger">{{ label }}</button></div><p v-if="error" class="error">{{ error }}</p><button class="primary" :disabled="saving">Підтвердити</button><button class="quiet" type="button" @click="dialog = null">Скасувати</button></form></div>
+    <div v-if="deleteHistoryAttempt" class="modal" role="dialog" aria-modal="true"><section class="modal-card"><h2>Видалити цей запис?</h2><p>Буде видалено лише обраний запис. Поточний шлях не зміниться.</p><button class="quiet" :disabled="saving" @click="deleteHistory">Видалити запис</button><button class="quiet" @click="deleteHistoryAttempt = null">Скасувати</button></section></div>
   </main>
 </template>
 
 <style>
-.character { width: min(100%, 330px); height: clamp(300px, 46vh, 380px); overflow: visible; background: transparent; border-radius: 0; box-shadow: none; filter: none !important; }
-.character-art { position: absolute; inset: 0; display: block; }
-.character .character-art img { position: absolute; inset: 0; z-index: auto; width: 100%; height: 100%; object-fit: contain; object-position: center; mix-blend-mode: normal; }
-.character .character-outline { opacity: .2; filter: grayscale(1) contrast(1.65) brightness(1.25); }
-.character-color { position: absolute; inset: 0; display: block; overflow: hidden; transition: clip-path .28s ease; }
-.character .character-color img { filter: none; }
-.character-fallback { position: relative; z-index: 1; display: grid; height: 100%; place-items: center; color: #f3a336; font-family: serif; font-size: 8rem; }
-@media (prefers-reduced-motion: reduce) { .character-color { transition: none; } }
+.character { position:relative; width:min(100%,330px); height:clamp(300px,46vh,380px); overflow:visible; background:transparent; border:0; margin:auto; display:block }.character img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; filter:grayscale(1) contrast(2.1) brightness(.62) sepia(.12); opacity:.68; mix-blend-mode:multiply }.character-color { position:absolute; inset:0; overflow:hidden; transition:clip-path .28s ease }.character-color img { filter:none; opacity:1; mix-blend-mode:normal }.money-card,.reason-card,.insight,.settings-card,.journey-total { margin:14px 0; padding:14px 16px; border:1px solid #e4d4b8; border-radius:16px; background:#fffaf1 }.money-card span,.reason-card span,.journey-total span { display:block; color:#7a7064; font-size:.85rem }.money-card strong,.reason-card strong,.journey-total strong { display:block; margin-top:3px; color:#263c32 }.money-card strong { font-size:1.35rem }.insight { font-size:.92rem; color:#575044 }.settings-card label { display:grid; gap:7px; margin:12px 0; font-weight:700 }.settings-card input,.settings-card textarea { box-sizing:border-box; width:100%; min-height:44px; border:1px solid #d9ccb7; border-radius:10px; background:#fffdf8; padding:10px; font:inherit }.settings-card textarea { min-height:76px; resize:vertical }.settings-card p { color:#74695d; font-size:.85rem }.chips { display:flex; flex-wrap:wrap; gap:7px; margin:10px 0 }.chips button { min-height:38px; padding:7px 10px; border:1px solid #d9ccb7; border-radius:999px; background:#fffaf1; color:#433b32; font:inherit }.chips button.selected { border-color:#c85d2c; background:#fae4c9 }.rank-grid em { display:block; margin-top:7px; font-size:.78rem; font-style:normal; opacity:.78 }.journey-total small { display:block; margin-top:10px; color:#74695d }.new-path { width:100%; margin-top:14px; color:#80452c }.practice { border-left:3px solid #d3884c; padding-left:10px }.pause .modal-card { text-align:center }.chakra { display:block; color:#bd5b2d; font-size:2rem }.pause-number { font-size:4rem; font-weight:800; margin:8px 0 }.modal-card .quiet,.modal-card .primary { width:100%; margin-top:10px }.modal-card label { display:grid; gap:6px; margin:12px 0; text-align:left; font-weight:700 }.chips button,.history-item .quiet { min-height:44px }.error { color:#b3422a }@media (prefers-reduced-motion:reduce){.character-color{transition:none}}
+.character > img { opacity:.18 }
 </style>

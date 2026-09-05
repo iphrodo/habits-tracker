@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { elapsedParts, milestonePercent } from '../server/utils/types'
+import { elapsedParts, milestonePercent, savedMoney } from '../server/utils/types'
 
 describe('elapsedParts', () => {
   it('counts completed 24-hour intervals rather than calendar days', () => {
     expect(elapsedParts(0, 23 * 3_600_000 + 59 * 60_000)).toEqual({ days: 0, hours: 23, minutes: 59 })
     expect(elapsedParts(0, 24 * 3_600_000)).toEqual({ days: 1, hours: 0, minutes: 0 })
+  })
+
+  it('calculates proportional savings and never returns a negative amount', () => {
+    const hour = 3_600_000
+    expect(savedMoney(0, 7, hour)).toBeCloseTo(0.2916667, 6)
+    expect(savedMoney(0, 7, 6 * hour)).toBe(1.75)
+    expect(savedMoney(0, 7, 12 * hour)).toBe(3.5)
+    expect(savedMoney(0, 7, 24 * hour)).toBe(7)
+    expect(savedMoney(10_000, 7, 1_000)).toBe(0)
   })
 
   it('does not return negative progress', () => {
