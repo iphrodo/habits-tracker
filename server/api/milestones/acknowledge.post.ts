@@ -7,5 +7,5 @@ export default defineEventHandler(async (event) => {
   const body = await readBody<{ days?: unknown, requestId?: unknown }>(event)
   if (!Array.isArray(body?.days) || body.days.some((day) => !MILESTONES.includes(day)) || typeof body.requestId !== 'string') throw createError({ statusCode: 400, statusMessage: 'Некоректні досягнення.' })
   noStore(event)
-  return acknowledgeMilestones(body.days, body.requestId)
+  return await acknowledgeMilestones(body.days, body.requestId)
 })

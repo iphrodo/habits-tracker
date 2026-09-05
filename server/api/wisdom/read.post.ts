@@ -11,5 +11,5 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Некоректні дані картки.' })
   }
   noStore(event)
-  return markWisdomRead(body.date, body.wisdomId, body.timezone, body.requestId)
+  return await markWisdomRead(body.date, body.wisdomId, body.timezone, body.requestId)
 })
