@@ -47,9 +47,16 @@ async function initialize(db: Client) {
 function rowToAttempt(row: Record<string, unknown>): Attempt {
   return { id: String(row.id), startedAt: Number(row.started_at), endedAt: row.ended_at === null ? null : Number(row.ended_at), startTimezone: String(row.start_timezone), version: Number(row.version), dailySmokingCostAtStart: Number(row.daily_smoking_cost_at_start ?? DEFAULT_COST), finalSavedMoney: row.final_saved_money === null || row.final_saved_money === undefined ? null : Number(row.final_saved_money) }
 }
-function rowToSettings(row?: Record<string, unknown>): TrackerSettings {
+export function rowToSettings(row?: Record<string, unknown>): TrackerSettings {
   if (!row) return DEFAULT_SETTINGS
-  return { personalReason: row.personal_reason === null ? null : String(row.personal_reason), dailySmokingCost: Math.max(0, Number(row.daily_smoking_cost) || DEFAULT_COST), currency: 'EUR' }
+  const rawCost = row.daily_smoking_cost
+  const parsedCost = rawCost === null || rawCost === undefined ? DEFAULT_COST : Number(rawCost)
+  const dailySmokingCost = Number.isFinite(parsedCost) && parsedCost >= 0 ? parsedCost : DEFAULT_COST
+  return {
+    personalReason: row.personal_reason === null || row.personal_reason === undefined ? null : String(row.personal_reason),
+    dailySmokingCost,
+    currency: 'EUR',
+  }
 }
 async function settingsFrom(db: Executor) { return rowToSettings((await db.execute('SELECT * FROM tracker_settings WHERE id = 1')).rows[0] as Record<string, unknown> | undefined) }
 async function insightFrom(db: Executor): Promise<TriggerInsight | null> {
@@ -89,7 +96,14 @@ export async function updateAttempt(id: string, startedAt: number, timezone: str
 }
 export async function updateSettings(personalReason: string | null, dailySmokingCost: number, requestId: string) {
   const db = await getDb(); const payload = { personalReason, dailySmokingCost }; const cached = await receipt<TrackerState>(db, requestId, 'update-settings', payload); if (cached.result) return cached.result
-  return transaction(async tx => { await tx.execute({ sql: 'UPDATE tracker_settings SET personal_reason = ?, daily_smoking_cost = ?, updated_at = ? WHERE id = 1', args: [personalReason, dailySmokingCost, Date.now()] }); const state = await trackerStateFrom(tx); await saveReceipt(tx, requestId, 'update-settings', cached.hash, state); return state })
+  return transaction(async tx => {
+    const updatedAt = Date.now()
+    await tx.execute({ sql: 'UPDATE tracker_settings SET personal_reason = ?, daily_smoking_cost = ?, updated_at = ? WHERE id = 1', args: [personalReason, dailySmokingCost, updatedAt] })
+    await tx.execute({ sql: 'UPDATE attempts SET daily_smoking_cost_at_start = ?, updated_at = ? WHERE ended_at IS NULL', args: [dailySmokingCost, updatedAt] })
+    const state = await trackerStateFrom(tx)
+    await saveReceipt(tx, requestId, 'update-settings', cached.hash, state)
+    return state
+  })
 }
 async function storeTrigger(tx: Executor, trigger: Trigger, active: Attempt, timestamp: number, rankKey?: string) { await tx.execute({ sql: 'INSERT INTO craving_events VALUES (?, ?, ?, ?, ?, ?)', args: [randomUUID(), timestamp, trigger, active.id, Math.floor(Math.max(0, timestamp - active.startedAt) / 86_400_000), rankKey || null] }) }
 export async function createCravingEvent(trigger: Trigger, rankKey: string | undefined, requestId: string) {
@@ -111,9 +125,24 @@ export async function newPath(startedAt: number, timezone: string, version: numb
   })
 }
 export async function restartAttempt(requestId: string) {
-  const db = await getDb(); const active = (await db.execute('SELECT * FROM attempts WHERE ended_at IS NULL')).rows[0] as Record<string, unknown> | undefined
-  if (!active) throw createError({ statusCode: 409, statusMessage: 'Немає активного шляху.' })
-  return newPath(Date.now(), String(active.start_timezone), Number(active.version), undefined, undefined, requestId)
+  const db = await getDb()
+  const cached = await receipt<TrackerState>(db, requestId, 'restart-attempt', {})
+  if (cached.result) return cached.result
+
+  return transaction(async (tx) => {
+    const row = (await tx.execute('SELECT * FROM attempts WHERE ended_at IS NULL')).rows[0] as Record<string, unknown> | undefined
+    if (!row) throw createError({ statusCode: 409, statusMessage: 'Немає активного шляху.' })
+    const active = rowToAttempt(row)
+    const restartedAt = Date.now()
+    await tx.execute({
+      sql: 'UPDATE attempts SET ended_at = ?, final_saved_money = ?, version = version + 1, updated_at = ? WHERE id = ?',
+      args: [restartedAt, savedMoney(active.startedAt, active.dailySmokingCostAtStart, restartedAt), restartedAt, active.id],
+    })
+    await insertAttempt(tx, restartedAt, active.startTimezone, await currentCost(tx))
+    const state = await trackerStateFrom(tx)
+    await saveReceipt(tx, requestId, 'restart-attempt', cached.hash, state)
+    return state
+  })
 }
 export async function deleteHistoryAttempt(id: string, requestId: string) {
   const db = await getDb(); const cached = await receipt<TrackerState>(db, requestId, 'delete-history-attempt', { id }); if (cached.result) return cached.result

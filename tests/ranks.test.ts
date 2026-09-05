@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NINJA_LEVELS, rankForDays } from '../shared/ranks'
+import { NINJA_LEVELS, rankForDays, rankStatusForDay } from '../shared/ranks'
 
 describe('ninja ranks', () => {
   it('maps every agreed threshold to its rank', () => {
@@ -13,5 +13,11 @@ describe('ninja ranks', () => {
     expect(rankForDays(60).name).toBe('АНБУ')
     expect(rankForDays(90).name).toBe('Саннін')
     expect(rankForDays(270).name).toBe('Хранитель шляху')
+  })
+
+  it('exposes rank state with Ukrainian text instead of color alone', () => {
+    expect(rankStatusForDay(0, 7)).toBe('Пройдений')
+    expect(rankStatusForDay(7, 7)).toBe('Поточний')
+    expect(rankStatusForDay(14, 7)).toBe('Майбутній')
   })
 })

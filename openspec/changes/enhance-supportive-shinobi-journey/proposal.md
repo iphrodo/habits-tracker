@@ -21,6 +21,8 @@
 - `smoking-cost-savings`: Configurable daily cost and accurate current, historical, and total savings.
 - `adaptive-shinobi-progression`: Revised rank cadence, stage-appropriate messaging, and continued post-year tracking.
 - `categorized-daily-wisdom`: Deterministic daily, categorized original wisdom cards without engagement streaks.
+- `accessible-mobile-experience`: Touch, keyboard, dialog-focus, rank-state, reduced-motion, and narrow-iPhone requirements.
+- `resilient-private-pwa`: Private Home Screen naming, bounded requests, and non-blocking foreground refresh.
 
 ### Modified Capabilities
 

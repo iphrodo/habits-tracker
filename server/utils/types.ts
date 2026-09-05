@@ -63,6 +63,18 @@ export function formatMoney(value: number, currency: 'EUR' = 'EUR') {
   return new Intl.NumberFormat('uk-UA', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.max(0, value))
 }
 
+export function journeyTotals(history: Attempt[], activeAttempt: Attempt | null, now = Date.now()) {
+  const completed = history.reduce((totals, attempt) => ({
+    elapsedMilliseconds: totals.elapsedMilliseconds + elapsedMilliseconds(attempt.startedAt, attempt.endedAt ?? attempt.startedAt),
+    savedMoney: totals.savedMoney + Math.max(0, attempt.finalSavedMoney ?? 0),
+  }), { elapsedMilliseconds: 0, savedMoney: 0 })
+  if (!activeAttempt) return completed
+  return {
+    elapsedMilliseconds: completed.elapsedMilliseconds + elapsedMilliseconds(activeAttempt.startedAt, now),
+    savedMoney: completed.savedMoney + savedMoney(activeAttempt.startedAt, activeAttempt.dailySmokingCostAtStart, now),
+  }
+}
+
 export function assertStartTime(startedAt: unknown): asserts startedAt is number {
   if (typeof startedAt !== 'number' || !Number.isSafeInteger(startedAt) || startedAt <= 0 || startedAt > Date.now() + 2_000) {
     throw createError({ statusCode: 400, statusMessage: 'Оберіть коректну дату в минулому.' })
