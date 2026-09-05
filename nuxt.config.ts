@@ -18,7 +18,10 @@ export default defineNuxtConfig({
         { name: 'apple-mobile-web-app-capable', content: 'yes' },
         { name: 'apple-mobile-web-app-status-bar-style', content: 'default' },
       ],
-      link: [{ rel: 'apple-touch-icon', href: '/icons/apple-touch-icon.svg' }],
+      link: [
+        { rel: 'icon', type: 'image/png', sizes: '48x48', href: '/icons/favicon.png' },
+        { rel: 'apple-touch-icon', sizes: '180x180', href: '/icons/apple-touch-icon.png' },
+      ],
     },
   },
   pwa: {
@@ -28,8 +31,8 @@ export default defineNuxtConfig({
       start_url: '/', scope: '/', display: 'standalone',
       theme_color: '#f7f0e3', background_color: '#f7f0e3', lang: 'uk',
       icons: [
-        { src: '/icons/icon.svg', sizes: '192x192', type: 'image/svg+xml', purpose: 'any' },
-        { src: '/icons/icon.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any' },
+        { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
       ],
     },
     workbox: { navigateFallbackDenylist: [/^\/api\//], globPatterns: ['**/*.{js,css,html,svg,ico}'] },
