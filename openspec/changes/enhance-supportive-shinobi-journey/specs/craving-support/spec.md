@@ -5,11 +5,19 @@ Give the owner a calm, optional way to pause during a craving and recognize recu
 ## ADDED Requirements
 
 ### Requirement: Guided chakra concentration
-The application SHALL provide a voluntary 60-second «Концентрація чакри» flow with three timed messages. On completion it SHALL ask how the owner feels and offer «Вже легше», «Ще 60 секунд», «Випити води», and «Пройтися» without treating any choice as success or failure.
+The application SHALL provide a voluntary 60-second «Концентрація чакри» flow with three timed messages. On completion it SHALL ask how the owner feels and offer «Вже легше», «Ще 60 секунд», «Випити води», and «Пройтися» without treating any choice as success or failure. When a personal reason exists, one compact supportive reason card SHALL remain available during all three timed stages, the «Як зараз?» check-in, and a repeated round without obscuring breathing or focus content. During the active craving flow the personal reason SHALL have priority over random wisdom. When the reason is empty, no empty heading or card SHALL appear.
 
 #### Scenario: Repeat the pause
 - **WHEN** the owner chooses «Ще 60 секунд» after the first round
 - **THEN** a second 60-second round begins with the alternate calm messages
+
+#### Scenario: Personal reason supports an active craving
+- **WHEN** the owner has saved a personal reason and opens concentration
+- **THEN** the reason is visible throughout the timed flow and check-in without replacing the stage message
+
+#### Scenario: Concentration without a personal reason
+- **WHEN** the owner has not saved a reason and opens concentration
+- **THEN** concentration works normally without an empty reason card or label
 
 ### Requirement: Optional trigger capture
 After a concentration round, the application SHALL offer optional trigger choices: stress, coffee, alcohol, after food, company, boredom, habit, and other. It SHALL record the selected trigger with timestamp, active-period day, and current rank when available.

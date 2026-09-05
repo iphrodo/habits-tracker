@@ -15,3 +15,10 @@ export const NINJA_LEVELS = [
 export function rankForDays(days: number) {
   return [...NINJA_LEVELS].reverse().find((item) => item.day <= Math.max(0, days)) || NINJA_LEVELS[0]!
 }
+
+export function rankStatusForDay(rankDay: number, elapsedDays: number) {
+  const current = rankForDays(elapsedDays)
+  if (rankDay < current.day) return 'Пройдений'
+  if (rankDay === current.day) return 'Поточний'
+  return 'Майбутній'
+}

@@ -51,6 +51,8 @@ Change shared rank data to the eleven specified day boundaries and add pure help
 
 Keep `app.vue` as the composition root. Add small local components only where a modal or dense card benefits from isolation; retain the existing bottom navigation, character presentation, cream palette, and safe-area behavior. The reason card is compact on Today, rises into the completed craving flow, and settings owns editing. The concentration overlay moves through `running → check-in → trigger` states with exit/skip actions at every step.
 
+Local date/time form values are assembled from local civil getters and parsed with the environment timezone; UTC ISO date slicing is not used for date inputs. Client API calls share a bounded timeout. Focus/visibility/online events update the local clock immediately and use one in-flight refresh coordinator so usable state remains visible. Overlay focus is managed without adding a component framework.
+
 ## Risks / Trade-offs
 
 - [An old installed client calls the old restart endpoint] → retain an alias with the existing idempotent behavior during this change.

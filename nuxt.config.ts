@@ -11,12 +11,14 @@ export default defineNuxtConfig({
   },
   app: {
     head: {
+      title: 'Вільно',
       htmlAttrs: { lang: 'uk' },
       meta: [
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
         { name: 'theme-color', content: '#f7f0e3' },
         { name: 'apple-mobile-web-app-capable', content: 'yes' },
         { name: 'apple-mobile-web-app-status-bar-style', content: 'default' },
+        { name: 'apple-mobile-web-app-title', content: 'Вільно' },
       ],
       link: [
         { rel: 'icon', type: 'image/png', sizes: '48x48', href: '/icons/favicon.png' },
@@ -27,7 +29,7 @@ export default defineNuxtConfig({
   pwa: {
     registerType: 'prompt',
     manifest: {
-      name: 'Вільно — дні без куріння', short_name: 'Вільно',
+      name: 'Вільно', short_name: 'Вільно',
       start_url: '/', scope: '/', display: 'standalone',
       theme_color: '#f7f0e3', background_color: '#f7f0e3', lang: 'uk',
       icons: [
