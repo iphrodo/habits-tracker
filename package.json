@@ -9,9 +9,10 @@
     "typecheck": "nuxt typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "backup": "node scripts/backup.mjs"
+    "migrate:local-to-turso": "node scripts/migrate-local-to-turso.mjs"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.4",
     "@vite-pwa/nuxt": "1.1.1",
     "nuxt": "4.5.2"
   },

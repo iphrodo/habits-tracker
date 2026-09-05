@@ -8,5 +8,5 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Некоректний ідентифікатор запиту.' })
   }
   noStore(event)
-  return deleteHistoryAttempt(getRouterParam(event, 'id')!, body.requestId)
+  return await deleteHistoryAttempt(getRouterParam(event, 'id')!, body.requestId)
 })

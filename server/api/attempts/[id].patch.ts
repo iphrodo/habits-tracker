@@ -8,5 +8,5 @@ export default defineEventHandler(async (event) => {
   assertStartTime(body?.startedAt); assertTimezone(body?.timezone)
   if (!Number.isInteger(body?.version) || typeof body?.requestId !== 'string') throw createError({ statusCode: 400, statusMessage: 'Некоректні дані оновлення.' })
   noStore(event)
-  return updateAttempt(getRouterParam(event, 'id')!, body.startedAt as number, body.timezone as string, body.version as number, body.requestId)
+  return await updateAttempt(getRouterParam(event, 'id')!, body.startedAt as number, body.timezone as string, body.version as number, body.requestId)
 })
