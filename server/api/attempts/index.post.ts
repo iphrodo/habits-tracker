@@ -8,5 +8,5 @@ export default defineEventHandler(async (event) => {
   assertStartTime(body?.startedAt); assertTimezone(body?.timezone)
   if (typeof body?.requestId !== 'string' || body.requestId.length < 8) throw createError({ statusCode: 400, statusMessage: 'Некоректний ідентифікатор запиту.' })
   noStore(event)
-  return createAttempt(body.startedAt as number, body.timezone as string, body.requestId)
+  return await createAttempt(body.startedAt as number, body.timezone as string, body.requestId)
 })

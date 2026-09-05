@@ -1,5 +1,4 @@
 import { defineNuxtConfig } from 'nuxt/config'
-import { resolve } from 'node:path'
 
 export default defineNuxtConfig({
   compatibilityDate: '2026-09-05',
@@ -8,7 +7,6 @@ export default defineNuxtConfig({
   modules: ['@vite-pwa/nuxt'],
   css: ['~/assets/main.css'],
   runtimeConfig: {
-    databasePath: process.env.NUXT_DATABASE_PATH || resolve(process.cwd(), 'data', 'vilno.sqlite'),
     trustedOrigin: process.env.NUXT_TRUSTED_ORIGIN || '',
   },
   app: {

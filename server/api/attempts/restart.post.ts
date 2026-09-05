@@ -6,5 +6,5 @@ export default defineEventHandler(async (event) => {
   const body = await readBody<{ requestId?: unknown }>(event)
   if (typeof body?.requestId !== 'string' || body.requestId.length < 8) throw createError({ statusCode: 400, statusMessage: 'Некоректний ідентифікатор запиту.' })
   noStore(event)
-  return restartAttempt(body.requestId)
+  return await restartAttempt(body.requestId)
 })
