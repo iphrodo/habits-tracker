@@ -89,7 +89,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (refreshTimer) clear
       <section v-if="tab === 'today'" class="today">
         <template v-if="active && progress">
           <div class="rank-label"><span>{{ level.japanese }}</span><strong>{{ level.name }}</strong></div>
-          <button class="character" :class="`character-${level.art}`" type="button" :aria-expanded="characterOpen" :aria-label="`Рівень: ${level.name}`" @click="characterOpen = !characterOpen"><img v-if="!characterImageError" :key="level.art" :src="`/characters/naruto-${level.art}.png`" alt="Наруто Узумакі" width="1024" height="1536" @error="characterImageError = true"><span v-else class="character-fallback" aria-hidden="true">忍</span><span class="character-aura" aria-hidden="true"></span></button>
+          <button class="character" :class="`character-${level.art}`" type="button" :aria-expanded="characterOpen" :aria-label="`Рівень: ${level.name}, розфарбовано на ${Math.round(milestoneProgress)} відсотків`" @click="characterOpen = !characterOpen"><span v-if="!characterImageError" :key="level.art" class="character-art" aria-hidden="true"><img class="character-outline" :src="`/characters/naruto-${level.art}.png`" alt="" width="1024" height="1536" @error="characterImageError = true"><span class="character-color" :style="{ clipPath: `inset(${100 - milestoneProgress}% 0 0 0)` }"><img :src="`/characters/naruto-${level.art}.png`" alt="" width="1024" height="1536"></span></span><span v-else class="character-fallback" aria-hidden="true">忍</span></button>
           <p v-if="characterOpen" class="character-note" role="status">{{ celebration || level.note }}</p>
           <div class="counter"><strong>{{ progress.days }}</strong><span>{{ pluralDays(progress.days) }} без куріння</span></div>
           <p class="subcounter">{{ String(progress.hours).padStart(2, '0') }} год {{ String(progress.minutes).padStart(2, '0') }} хв</p>
@@ -112,5 +112,12 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (refreshTimer) clear
 </template>
 
 <style>
+.character { width: min(100%, 330px); height: clamp(300px, 46vh, 380px); overflow: visible; background: transparent; border-radius: 0; box-shadow: none; filter: none !important; }
+.character-art { position: absolute; inset: 0; display: block; }
+.character .character-art img { position: absolute; inset: 0; z-index: auto; width: 100%; height: 100%; object-fit: contain; object-position: center; mix-blend-mode: normal; }
+.character .character-outline { opacity: .2; filter: grayscale(1) contrast(1.65) brightness(1.25); }
+.character-color { position: absolute; inset: 0; display: block; overflow: hidden; transition: clip-path .28s ease; }
+.character .character-color img { filter: none; }
 .character-fallback { position: relative; z-index: 1; display: grid; height: 100%; place-items: center; color: #f3a336; font-family: serif; font-size: 8rem; }
+@media (prefers-reduced-motion: reduce) { .character-color { transition: none; } }
 </style>
