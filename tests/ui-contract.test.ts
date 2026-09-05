@@ -5,6 +5,11 @@ const app = readFileSync(new URL('../app.vue', import.meta.url), 'utf8')
 const globalCss = readFileSync(new URL('../assets/main.css', import.meta.url), 'utf8')
 
 describe('accessible UI contract', () => {
+  it('uses freedom-focused wording for the primary day counter', () => {
+    expect(app).toContain('{{ pluralDays(progress.days) }} свободи')
+    expect(app).not.toContain('{{ pluralDays(progress.days) }} без куріння')
+  })
+
   it('keeps the personal reason in the active Chakra overlay and omits it through v-if when empty', () => {
     expect(app).toContain('v-if="state?.settings.personalReason" class="reason-card craving-reason"')
     expect(app).toContain('{{ state.settings.personalReason }}')

@@ -58,8 +58,12 @@ Settings, craving events, and attempt economics SHALL use the existing server-ba
 - **THEN** migration preserves the rows and active start date, supplies safe economic defaults, and does not create or remove an attempt
 
 ### Requirement: Supportive language
-The application SHALL avoid language that labels a new period as failure, loss, reset, or erased progress. It SHALL use brief Ukrainian messages that shift from handling a moment at early stages to autonomy and identity at later stages.
+The application SHALL avoid language that labels a new period as failure, loss, reset, or erased progress. It SHALL use brief Ukrainian messages that shift from handling a moment at early stages to autonomy and identity at later stages. The primary Today counter SHALL describe elapsed days as «день свободи», «дні свободи», or «днів свободи» rather than repeatedly labeling them «без куріння».
 
 #### Scenario: New path confirmation
 - **WHEN** the owner opens the new-path flow
 - **THEN** the screen communicates that one cigarette does not erase the path already completed
+
+#### Scenario: Primary elapsed-day label
+- **WHEN** the Today screen shows the main elapsed-day counter
+- **THEN** its Ukrainian label uses the grammatically appropriate form of «дні свободи» and does not say «днів без куріння»
