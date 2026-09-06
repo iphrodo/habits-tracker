@@ -47,4 +47,15 @@ describe('accessible UI contract', () => {
     expect(app).toContain('if (initialLoad) loading.value = false')
     expect(app).toContain('<template v-else-if="state">')
   })
+
+  it('keeps recovery and Chakra support semantic, optional, and free of health percentages', () => {
+    expect(app).toContain('aria-controls="recovery-timeline"')
+    expect(app).toContain('role="progressbar" aria-label="Минуло часу концентрації чакри"')
+    expect(app).toContain('v-for="value in 5"')
+    expect(app).toContain('Концентрація чакри')
+    expect(app).not.toContain('Прочитано')
+    expect(app).not.toContain('здоров’я:')
+    expect(app).toContain('Джерело: ВООЗ')
+    expect(app).toContain('prefers-reduced-motion: reduce')
+  })
 })

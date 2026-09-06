@@ -7,7 +7,6 @@ export interface Wisdom {
   romaji: string
   translation: string
   reflection: string
-  practice?: string
   source: string
   sourceLabel: string
 }
@@ -47,7 +46,7 @@ const entries: Array<[string, WisdomCategory, string, string, string, string, st
   ['wait-kindly', 'терпіння', '待つ', 'Matsu', 'Терпіння не вимагає жорсткості.', 'Можна чекати хвилю з добротою до себе.'],
 ]
 
-export const WISDOM_CATALOG: Wisdom[] = entries.map(([id, category, japanese, romaji, translation, reflection, practice]) => ({ id, category, japanese, romaji, translation, reflection, practice, source: '', sourceLabel: 'Авторська думка «Вільно»' }))
+export const WISDOM_CATALOG: Wisdom[] = entries.map(([id, category, japanese, romaji, translation, reflection]) => ({ id, category, japanese, romaji, translation, reflection, source: '', sourceLabel: 'Авторська думка «Вільно»' }))
 
 export function dateKeyInTimezone(timezone: string, now = Date.now()) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
@@ -55,7 +54,16 @@ export function dateKeyInTimezone(timezone: string, now = Date.now()) {
   return `${value('year')}-${value('month')}-${value('day')}`
 }
 
-export function wisdomForDate(localDate: string): Wisdom {
-  const day = Math.floor(Date.parse(`${localDate}T00:00:00Z`) / 86_400_000)
-  return WISDOM_CATALOG[((day % WISDOM_CATALOG.length) + WISDOM_CATALOG.length) % WISDOM_CATALOG.length]!
+export interface WisdomContext { elapsedDays?: number, recentRestart?: boolean }
+function hashIndex(key: string, size: number) { let hash = 2166136261; for (const char of key) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619) } return (hash >>> 0) % size }
+export function wisdomForDate(localDate: string, context: WisdomContext = {}): Wisdom {
+  if (context.elapsedDays === undefined && context.recentRestart === undefined) {
+    const day = Math.floor(Date.parse(`${localDate}T00:00:00Z`) / 86_400_000)
+    return WISDOM_CATALOG[((day % WISDOM_CATALOG.length) + WISDOM_CATALOG.length) % WISDOM_CATALOG.length]!
+  }
+  const days = Math.max(0, context.elapsedDays ?? 0)
+  const categories: WisdomCategory[] = days <= 3 ? ['спокій', 'тяга', 'терпіння', 'дисципліна'] : days <= 6 ? ['спокій', 'тяга', 'терпіння', 'дисципліна', 'прогрес'] : days <= 90 ? ['прогрес', 'дисципліна', 'свобода', 'ідентичність'] : ['свобода', 'ідентичність', 'прогрес']
+  if (context.recentRestart) categories.push('відновлення')
+  const eligible = WISDOM_CATALOG.filter(item => categories.includes(item.category))
+  return eligible[hashIndex(`${localDate}:${days <= 3 ? 'early' : days <= 90 ? 'middle' : 'late'}:${context.recentRestart ? 'restart' : 'first'}`, eligible.length)]!
 }

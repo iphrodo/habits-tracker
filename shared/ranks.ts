@@ -16,6 +16,26 @@ export function rankForDays(days: number) {
   return [...NINJA_LEVELS].reverse().find((item) => item.day <= Math.max(0, days)) || NINJA_LEVELS[0]!
 }
 
+export interface RankInterval {
+  current: (typeof NINJA_LEVELS)[number]
+  next: (typeof NINJA_LEVELS)[number] | null
+  progress: number
+}
+
+/** Progress in the selected rank's own interval, rather than since day zero. */
+export function rankIntervalForDays(days: number): RankInterval {
+  const elapsed = Math.max(0, days)
+  const current = rankForDays(elapsed)
+  const index = NINJA_LEVELS.findIndex(rank => rank.day === current.day)
+  const next = NINJA_LEVELS[index + 1] || null
+  if (!next) return { current, next: null, progress: 100 }
+  return {
+    current,
+    next,
+    progress: Math.max(0, Math.min(100, (elapsed - current.day) / (next.day - current.day) * 100)),
+  }
+}
+
 export function rankStatusForDay(rankDay: number, elapsedDays: number) {
   const current = rankForDays(elapsedDays)
   if (rankDay < current.day) return 'Пройдений'

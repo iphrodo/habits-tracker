@@ -74,4 +74,18 @@ describe('API handlers', () => {
     requestBody = { trigger: 'unknown', requestId: 'craving-request' }
     await expect(cravingHandler({})).rejects.toMatchObject({ statusCode: 400 })
   })
+
+  it('accepts optional enriched craving fields and rejects invalid intensity or coping values', async () => {
+    requestBody = { trigger: 'coffee', rankKey: 'Генін', intensity: 5, copingMethod: 'water', requestId: 'enriched-request' }
+    db.createCravingEvent.mockResolvedValue({ triggerInsight: null })
+    await expect(cravingHandler({})).resolves.toEqual({ triggerInsight: null })
+    expect(db.createCravingEvent).toHaveBeenCalledWith('coffee', 'Генін', 'enriched-request', 5, 'water')
+
+    for (const intensity of [0, 6, 1.5]) {
+      requestBody = { trigger: 'coffee', intensity, requestId: `bad-intensity-${intensity}` }
+      await expect(cravingHandler({})).rejects.toMatchObject({ statusCode: 400 })
+    }
+    requestBody = { trigger: 'coffee', copingMethod: 'unknown', requestId: 'bad-coping' }
+    await expect(cravingHandler({})).rejects.toMatchObject({ statusCode: 400 })
+  })
 })

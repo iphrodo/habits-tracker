@@ -43,13 +43,23 @@ describe('tracker persistence', () => {
     expect(first.activeAttempt!.dailySmokingCostAtStart).toBe(8)
   })
 
-  it('records optional triggers and exposes a neutral recent insight after repeated events', async () => {
+  it('records optional triggers and exposes a neutral recent insight after five repeated events', async () => {
     const state = await createAttempt(Date.now() - 3_600_000, 'Europe/Sofia', 'create-for-trigger')
-    await createCravingEvent('coffee', 'Академія', 'trigger-request-one')
-    await createCravingEvent('coffee', 'Академія', 'trigger-request-two')
+    for (let index = 0; index < 5; index++) await createCravingEvent('coffee', 'Академія', `trigger-request-${index}`)
     const latest = await trackerState()
     expect(latest.activeAttempt!.id).toBe(state.activeAttempt!.id)
-    expect(latest.triggerInsight).toEqual({ trigger: 'coffee', count: 2 })
+    expect(latest.triggerInsight).toEqual({ kind: 'trigger', key: 'coffee', count: 5 })
+  })
+
+  it('stores enriched craving fields and leaves skipped fields nullable', async () => {
+    await createAttempt(Date.now() - 3_600_000, 'Europe/Sofia', 'create-enriched-event')
+    await createCravingEvent('coffee', 'Академія', 'enriched-event', 5, 'water')
+    await createCravingEvent('stress', 'Академія', 'optional-event')
+    const raw = createClient({ url: `file:${databasePath}`, authToken: 'local-test-token' })
+    const rows = await raw.execute('SELECT trigger_key, intensity, coping_method FROM craving_events ORDER BY created_at, id')
+    raw.close()
+    expect(rows.rows).toContainEqual(expect.objectContaining({ trigger_key: 'coffee', intensity: 5, coping_method: 'water' }))
+    expect(rows.rows).toContainEqual(expect.objectContaining({ trigger_key: 'stress', intensity: null, coping_method: null }))
   })
 
   it.each([0, 7, 7.5])('roundtrips a valid daily cost of %s', async (cost) => {
@@ -134,6 +144,10 @@ describe('tracker persistence', () => {
     const first = await trackerState()
     expect(first.activeAttempt).toMatchObject({ id: 'legacy-active', dailySmokingCostAtStart: 7 })
     expect(first.settings).toEqual({ personalReason: null, dailySmokingCost: 7, currency: 'EUR' })
+    const migrated = createClient({ url: `file:${databasePath}`, authToken: 'local-test-token' })
+    const columns = await migrated.execute('PRAGMA table_info(craving_events)')
+    migrated.close()
+    expect(columns.rows.map(row => row.name)).toEqual(expect.arrayContaining(['intensity', 'coping_method']))
     closeDbForTests()
 
     const second = await trackerState()
