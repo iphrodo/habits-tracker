@@ -3,6 +3,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { Attempt, DailyWisdomState, TrackerSettings, TrackerState, TriggerInsight } from './types'
 import { savedMoney } from './types'
 import { dateKeyInTimezone, wisdomForDate } from './wisdom'
+import { practiceForDate } from './practice'
+import { selectCravingInsight } from './insights'
 
 type Executor = Pick<Client, 'execute'> | Transaction
 type Trigger = 'stress' | 'coffee' | 'alcohol' | 'after_food' | 'company' | 'boredom' | 'habit' | 'other'
@@ -34,6 +36,10 @@ async function initialize(db: Client) {
       { sql: 'UPDATE attempts SET daily_smoking_cost_at_start = ? WHERE daily_smoking_cost_at_start IS NULL', args: [DEFAULT_COST] },
       { sql: 'UPDATE attempts SET final_saved_money = MAX(0, ended_at - started_at) / 86400000.0 * COALESCE(daily_smoking_cost_at_start, ?) WHERE ended_at IS NOT NULL AND final_saved_money IS NULL', args: [DEFAULT_COST] },
     ],
+    [
+      'ALTER TABLE craving_events ADD COLUMN intensity INTEGER CHECK (intensity IS NULL OR (intensity BETWEEN 1 AND 5))',
+      'ALTER TABLE craving_events ADD COLUMN coping_method TEXT',
+    ],
   ]
   const applied = await db.execute('SELECT version FROM schema_migrations')
   const seen = new Set(applied.rows.map(row => Number(row.version)))
@@ -60,9 +66,12 @@ export function rowToSettings(row?: Record<string, unknown>): TrackerSettings {
 }
 async function settingsFrom(db: Executor) { return rowToSettings((await db.execute('SELECT * FROM tracker_settings WHERE id = 1')).rows[0] as Record<string, unknown> | undefined) }
 async function insightFrom(db: Executor): Promise<TriggerInsight | null> {
-  const rows = (await db.execute(`SELECT trigger_key, COUNT(*) AS count FROM craving_events WHERE created_at >= ? GROUP BY trigger_key ORDER BY count DESC, trigger_key ASC LIMIT 1`, [Date.now() - 30 * 86_400_000])).rows as Record<string, unknown>[]
-  if (!rows[0] || Number(rows[0].count) < 2) return null
-  return { trigger: String(rows[0].trigger_key), count: Number(rows[0].count) }
+  const rows = (await db.execute({ sql: 'SELECT trigger_key, intensity, coping_method FROM craving_events WHERE created_at >= ? ORDER BY created_at DESC', args: [Date.now() - 30 * 86_400_000] })).rows as Record<string, unknown>[]
+  return selectCravingInsight(rows.map(row => ({
+    trigger: String(row.trigger_key),
+    intensity: row.intensity === null || row.intensity === undefined ? null : Number(row.intensity),
+    copingMethod: row.coping_method === null || row.coping_method === undefined ? null : String(row.coping_method),
+  })))
 }
 async function trackerStateFrom(db: Executor): Promise<TrackerState> {
   const active = (await db.execute('SELECT * FROM attempts WHERE ended_at IS NULL')).rows[0] as Record<string, unknown> | undefined
@@ -105,10 +114,15 @@ export async function updateSettings(personalReason: string | null, dailySmoking
     return state
   })
 }
-async function storeTrigger(tx: Executor, trigger: Trigger, active: Attempt, timestamp: number, rankKey?: string) { await tx.execute({ sql: 'INSERT INTO craving_events VALUES (?, ?, ?, ?, ?, ?)', args: [randomUUID(), timestamp, trigger, active.id, Math.floor(Math.max(0, timestamp - active.startedAt) / 86_400_000), rankKey || null] }) }
-export async function createCravingEvent(trigger: Trigger, rankKey: string | undefined, requestId: string) {
-  const db = await getDb(); const payload = { trigger, rankKey }; const cached = await receipt<TrackerState>(db, requestId, 'create-craving-event', payload); if (cached.result) return cached.result
-  return transaction(async tx => { const row = (await tx.execute('SELECT * FROM attempts WHERE ended_at IS NULL')).rows[0] as Record<string, unknown> | undefined; if (!row) throw createError({ statusCode: 409, statusMessage: 'Немає активного шляху.' }); await storeTrigger(tx, trigger, rowToAttempt(row), Date.now(), rankKey); const state = await trackerStateFrom(tx); await saveReceipt(tx, requestId, 'create-craving-event', cached.hash, state); return state })
+async function storeTrigger(tx: Executor, trigger: Trigger, active: Attempt, timestamp: number, rankKey?: string, intensity?: number, copingMethod?: string) {
+  await tx.execute({
+    sql: 'INSERT INTO craving_events (id, created_at, trigger_key, attempt_id, period_day, rank_key, intensity, coping_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    args: [randomUUID(), timestamp, trigger, active.id, Math.floor(Math.max(0, timestamp - active.startedAt) / 86_400_000), rankKey || null, intensity ?? null, copingMethod ?? null],
+  })
+}
+export async function createCravingEvent(trigger: Trigger, rankKey: string | undefined, requestId: string, intensity?: number, copingMethod?: string) {
+  const db = await getDb(); const payload = { trigger, rankKey, intensity: intensity ?? null, copingMethod: copingMethod ?? null }; const cached = await receipt<TrackerState>(db, requestId, 'create-craving-event', payload); if (cached.result) return cached.result
+  return transaction(async tx => { const row = (await tx.execute('SELECT * FROM attempts WHERE ended_at IS NULL')).rows[0] as Record<string, unknown> | undefined; if (!row) throw createError({ statusCode: 409, statusMessage: 'Немає активного шляху.' }); await storeTrigger(tx, trigger, rowToAttempt(row), Date.now(), rankKey, intensity, copingMethod); const state = await trackerStateFrom(tx); await saveReceipt(tx, requestId, 'create-craving-event', cached.hash, state); return state })
 }
 export async function newPath(startedAt: number, timezone: string, version: number, trigger: Trigger | undefined, rankKey: string | undefined, requestId: string) {
   const db = await getDb(); const payload = { startedAt, timezone, version, trigger, rankKey }; const cached = await receipt<TrackerState>(db, requestId, 'new-path', payload); if (cached.result) return cached.result
@@ -152,10 +166,19 @@ export async function acknowledgeMilestones(days: number[], requestId: string) {
   const db = await getDb(); const cached = await receipt<TrackerState>(db, requestId, 'acknowledge-milestones', { days }); if (cached.result) return cached.result
   return transaction(async tx => { const active = (await tx.execute('SELECT id FROM attempts WHERE ended_at IS NULL')).rows[0] as Record<string, unknown> | undefined; if (!active) throw createError({ statusCode: 409, statusMessage: 'Немає активного шляху.' }); for (const day of days) await tx.execute({ sql: 'INSERT OR IGNORE INTO milestone_acknowledgements VALUES (?, ?, ?)', args: [String(active.id), day, Date.now()] }); const state = await trackerStateFrom(tx); await saveReceipt(tx, requestId, 'acknowledge-milestones', cached.hash, state); return state })
 }
-export async function dailyWisdom(timezone: string): Promise<DailyWisdomState> { const date = dateKeyInTimezone(timezone); const wisdom = wisdomForDate(date); const row = (await (await getDb()).execute({ sql: 'SELECT read_at FROM daily_wisdom_reads WHERE local_date = ? AND wisdom_id = ?', args: [date, wisdom.id] })).rows[0] as Record<string, unknown> | undefined; return { serverNow: Date.now(), date, timezone, wisdom, readAt: row ? Number(row.read_at) : null } }
+export async function dailyWisdom(timezone: string): Promise<DailyWisdomState> {
+  const db = await getDb()
+  const date = dateKeyInTimezone(timezone)
+  const active = (await db.execute('SELECT * FROM attempts WHERE ended_at IS NULL')).rows[0] as Record<string, unknown> | undefined
+  const history = (await db.execute('SELECT id FROM attempts WHERE ended_at IS NOT NULL LIMIT 1')).rows
+  const now = Date.now()
+  const elapsedDays = active ? Math.floor(Math.max(0, now - Number(active.started_at)) / 86_400_000) : 0
+  const recentRestart = Boolean(active && history.length && elapsedDays <= 7)
+  return { serverNow: now, date, timezone, wisdom: wisdomForDate(date, { elapsedDays, recentRestart }), practice: practiceForDate(date, elapsedDays) }
+}
 export async function markWisdomRead(localDate: string, wisdomId: string, timezone: string, requestId: string) {
-  const db = await getDb(); const cached = await receipt<DailyWisdomState>(db, requestId, 'mark-wisdom-read', { localDate, wisdomId, timezone }); if (cached.result) return cached.result
+  const db = await getDb(); const cached = await receipt<{ serverNow: number, date: string, timezone: string, wisdom: import('./wisdom').Wisdom, readAt: number }>(db, requestId, 'mark-wisdom-read', { localDate, wisdomId, timezone }); if (cached.result) return cached.result
   if (localDate > dateKeyInTimezone(timezone) || wisdomForDate(localDate).id !== wisdomId) throw createError({ statusCode: 400, statusMessage: 'Ця картка не відповідає обраній даті.' })
-  return transaction(async tx => { await tx.execute({ sql: 'INSERT OR IGNORE INTO daily_wisdom_reads VALUES (?, ?, ?)', args: [localDate, wisdomId, Date.now()] }); const row = (await tx.execute({ sql: 'SELECT read_at FROM daily_wisdom_reads WHERE local_date = ? AND wisdom_id = ?', args: [localDate, wisdomId] })).rows[0] as Record<string, unknown>; const result: DailyWisdomState = { serverNow: Date.now(), date: localDate, timezone, wisdom: wisdomForDate(localDate), readAt: Number(row.read_at) }; await saveReceipt(tx, requestId, 'mark-wisdom-read', cached.hash, result); return result })
+  return transaction(async tx => { await tx.execute({ sql: 'INSERT OR IGNORE INTO daily_wisdom_reads VALUES (?, ?, ?)', args: [localDate, wisdomId, Date.now()] }); const row = (await tx.execute({ sql: 'SELECT read_at FROM daily_wisdom_reads WHERE local_date = ? AND wisdom_id = ?', args: [localDate, wisdomId] })).rows[0] as Record<string, unknown>; const result = { serverNow: Date.now(), date: localDate, timezone, wisdom: wisdomForDate(localDate), readAt: Number(row.read_at) }; await saveReceipt(tx, requestId, 'mark-wisdom-read', cached.hash, result); return result })
 }
 export function closeDbForTests() { database?.close(); database = undefined; initialization = undefined }

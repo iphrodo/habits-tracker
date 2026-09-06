@@ -15,7 +15,8 @@ export interface TrackerSettings {
 }
 
 export interface TriggerInsight {
-  trigger: string
+  kind: 'trigger' | 'intensity-trigger' | 'coping'
+  key: string
   count: number
 }
 
@@ -33,7 +34,7 @@ export interface DailyWisdomState {
   date: string
   timezone: string
   wisdom: import('./wisdom').Wisdom
-  readAt: number | null
+  practice: import('./practice').Practice
 }
 
 export const MILESTONES = [1, 3, 7, 14, 30, 60, 90, 180, 270, 365]

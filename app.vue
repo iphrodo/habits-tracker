@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 import type { Attempt, DailyWisdomState, TrackerState } from './server/utils/types'
-import { elapsedParts, formatMoney, journeyTotals, MILESTONES, savedMoney } from './server/utils/types'
+import { elapsedParts, formatMoney, journeyTotals, savedMoney } from './server/utils/types'
 import { localDateTimeToTimestamp, timestampToLocalDateTime } from './shared/local-date-time'
 import { NINJA_LEVELS, rankForDays, rankStatusForDay } from './shared/ranks'
+import { rankIntervalForDays } from './shared/ranks'
+import { recoveryForJourney } from './shared/recovery'
 import { createRefreshCoordinator } from './shared/refresh-coordinator'
 
 type Tab = 'today' | 'milestones' | 'settings'
 type Dialog = 'start' | 'edit' | 'new-path' | null
 type Trigger = 'stress' | 'coffee' | 'alcohol' | 'after_food' | 'company' | 'boredom' | 'habit' | 'other'
+type CopingMethod = 'chakra' | 'water' | 'walk' | 'changed_activity' | 'waited' | 'talked' | 'other' | 'not_easier'
 
 const API_TIMEOUT = 8_000
 const triggerLabels: Record<Trigger, string> = {
@@ -20,6 +23,10 @@ const triggerLabels: Record<Trigger, string> = {
   boredom: 'Нудьга',
   habit: 'Звичка',
   other: 'Інше',
+}
+const copingLabels: Record<CopingMethod, string> = {
+  chakra: 'Концентрація чакри', water: 'Вода', walk: 'Прогулянка', changed_activity: 'Змінив заняття',
+  waited: 'Просто почекав', talked: 'Поговорив з кимось', other: 'Інше', not_easier: 'Ще не стало легше',
 }
 const reasonSuggestions = [
   'Хочу перестати залежати',
@@ -45,16 +52,19 @@ const dialog = ref<Dialog>(null)
 const deleteHistoryAttempt = ref<Attempt | null>(null)
 const scrollOpen = ref(false)
 const characterOpen = ref(false)
+const recoveryOpen = ref(false)
 const now = ref(Date.now())
 const formDate = ref('')
 const formTime = ref('')
 const originalFormTimestamp = ref<number | undefined>()
 const selectedTrigger = ref<Trigger | undefined>()
+const selectedIntensity = ref<number | undefined>()
+const selectedCoping = ref<CopingMethod | undefined>()
 const reasonDraft = ref('')
 const costDraft = ref('7')
 const chakraEndsAt = ref<number | null>(null)
 const chakraRound = ref(0)
-const chakraStage = ref<'running' | 'checkin' | 'trigger'>('running')
+const chakraStage = ref<'running' | 'checkin' | 'trigger' | 'intensity' | 'coping'>('running')
 const { needRefresh, updateServiceWorker } = useRegisterSW()
 
 let timer: ReturnType<typeof setInterval> | undefined
@@ -63,12 +73,11 @@ let focusReturn: HTMLElement | null = null
 const active = computed(() => state.value?.activeAttempt || null)
 const progress = computed(() => active.value ? elapsedParts(active.value.startedAt, now.value) : null)
 const level = computed(() => rankForDays(progress.value?.days || 0))
-const nextMilestone = computed(() => MILESTONES.find(day => day > (progress.value?.days || 0)) || null)
-const milestoneProgress = computed(() => {
-  if (!progress.value || !nextMilestone.value) return 100
-  const elapsedDays = progress.value.days + progress.value.hours / 24 + progress.value.minutes / 1_440
-  return Math.min(100, elapsedDays / nextMilestone.value * 100)
-})
+const rankInterval = computed(() => rankIntervalForDays((progress.value?.days || 0) + (progress.value?.hours || 0) / 24 + (progress.value?.minutes || 0) / 1_440))
+const nextMilestone = computed(() => rankInterval.value.next?.day || null)
+const milestoneProgress = computed(() => rankInterval.value.progress)
+const recovery = computed(() => active.value ? recoveryForJourney(active.value.startedAt, now.value) : null)
+const chakraElapsed = computed(() => Math.max(0, Math.min(60, 60 - chakraRemaining.value)))
 const currentSaved = computed(() => active.value
   ? savedMoney(active.value.startedAt, active.value.dailySmokingCostAtStart, now.value)
   : 0)
@@ -135,6 +144,8 @@ function setForm(value: number) {
   formDate.value = local.date
   formTime.value = local.time
   selectedTrigger.value = undefined
+  selectedIntensity.value = undefined
+  selectedCoping.value = undefined
 }
 
 function formTimestamp() {
@@ -316,27 +327,12 @@ async function saveSettings() {
   }
 }
 
-async function markWisdomRead() {
-  if (!wisdom.value) return
-  actionError.value = ''
-  try {
-    wisdom.value = await apiFetch<DailyWisdomState>('/api/wisdom/read', {
-      method: 'POST',
-      body: {
-        date: wisdom.value.date,
-        wisdomId: wisdom.value.wisdom.id,
-        timezone: timezone(),
-        requestId: requestId(),
-      },
-    })
-  } catch {
-    actionError.value = 'Не вдалося зберегти відмітку.'
-  }
-}
-
 function startChakra(round = 0) {
   if (chakraEndsAt.value === null) rememberFocus()
   chakraRound.value = round
+  selectedTrigger.value = undefined
+  selectedIntensity.value = undefined
+  selectedCoping.value = undefined
   chakraStage.value = 'running'
   chakraEndsAt.value = Date.now() + 60_000
   void focusDialog()
@@ -347,13 +343,18 @@ function closeChakra() {
   void restoreFocus()
 }
 
-async function recordTrigger(trigger: Trigger | undefined) {
+function chooseTrigger(trigger: Trigger) {
+  selectedTrigger.value = trigger
+  chakraStage.value = 'intensity'
+}
+
+async function recordTrigger() {
   actionError.value = ''
-  if (trigger) {
+  if (selectedTrigger.value) {
     try {
       state.value = await apiFetch<TrackerState>('/api/cravings', {
         method: 'POST',
-        body: { trigger, rankKey: level.value.name, requestId: requestId() },
+        body: { trigger: selectedTrigger.value, rankKey: level.value.name, intensity: selectedIntensity.value, copingMethod: selectedCoping.value, requestId: requestId() },
       })
     } catch {
       actionError.value = 'Не вдалося зберегти тригер.'
@@ -469,7 +470,7 @@ onBeforeUnmount(() => {
             @click="characterOpen = !characterOpen"
           >
             <img :src="`/characters/naruto-${level.art}.png?v=2`" alt="" width="1024" height="1536">
-            <span class="character-color" :style="{ clipPath: `inset(${100 - milestoneProgress}% 0 0 0)` }">
+            <span class="character-color" :style="{ '--reveal': `${milestoneProgress}%` }">
               <img :src="`/characters/naruto-${level.art}.png?v=2`" alt="" width="1024" height="1536">
             </span>
           </button>
@@ -502,12 +503,29 @@ onBeforeUnmount(() => {
               <span :style="{ width: `${milestoneProgress}%` }" />
             </div>
           </div>
+          <article v-if="recovery" class="recovery-card">
+            <button class="recovery-head" type="button" :aria-expanded="recoveryOpen" aria-controls="recovery-timeline" @click="recoveryOpen = !recoveryOpen">
+              <span>Відновлення</span>
+              <strong>{{ recovery.latestCompleted?.label || recovery.currentOrNext?.label }}</strong>
+              <small>{{ recovery.currentOrNext?.state === 'current' ? 'Поточний період' : recovery.latestCompleted ? 'Пройдений орієнтир' : 'Наступний орієнтир' }}</small>
+            </button>
+            <div v-if="recoveryOpen" id="recovery-timeline" class="recovery-timeline">
+              <article v-for="item in recovery.items" :key="item.id" :class="item.state">
+                <strong>{{ item.label }} · {{ item.state === 'completed' ? 'Пройдений орієнтир' : item.state === 'current' ? 'Поточний період' : 'Попереду' }}</strong>
+                <p>{{ item.description }}</p>
+              </article>
+              <p class="disclaimer">Орієнтовні зміни організму після припинення куріння. Індивідуальний перебіг може відрізнятися.</p>
+              <a href="https://www.who.int/news-room/questions-and-answers/item/tobacco-health-benefits-of-smoking-cessation" target="_blank" rel="noopener">Джерело: ВООЗ</a>
+            </div>
+          </article>
           <article v-if="state.settings.personalReason" class="reason-card">
             <span>Твоя причина</span>
             <strong>{{ state.settings.personalReason }}</strong>
           </article>
           <article v-if="state.triggerInsight" class="insight">
-            Останнім часом бажання найчастіше виникало: {{ triggerLabels[state.triggerInsight.trigger as Trigger] }}.
+            <template v-if="state.triggerInsight.kind === 'trigger'">Останнім часом найчастіше траплявся тригер: {{ triggerLabels[state.triggerInsight.key as Trigger] }}.</template>
+            <template v-else-if="state.triggerInsight.kind === 'intensity-trigger'">У записах з найвищою напругою частіше траплявся тригер: {{ triggerLabels[state.triggerInsight.key as Trigger] }}.</template>
+            <template v-else>Найчастіше обраний спосіб підтримки: {{ copingLabels[state.triggerInsight.key as CopingMethod] }}.</template>
           </article>
           <button class="primary breath" type="button" @click="startChakra()">
             Концентрація чакри <span>60 с</span>
@@ -528,11 +546,10 @@ onBeforeUnmount(() => {
               <p class="romaji">{{ wisdom.wisdom.romaji }}</p>
               <p class="translation">{{ wisdom.wisdom.translation }}</p>
               <p class="reflection">{{ wisdom.wisdom.reflection }}</p>
-              <p v-if="wisdom.wisdom.practice" class="practice">{{ wisdom.wisdom.practice }}</p>
-              <button v-if="!wisdom.readAt" class="stamp-button" type="button" @click="markWisdomRead">
-                Прочитано <span>読</span>
-              </button>
-              <p v-else class="read-stamp">読 · Прочитано</p>
+              <section class="practice" aria-label="Практика дня">
+                <strong>今日の修行 · Практика дня</strong>
+                <p>{{ wisdom.practice.text }}</p>
+              </section>
             </div>
           </article>
           <p v-else-if="wisdomError" class="wisdom-error">{{ wisdomError }}</p>
@@ -648,6 +665,7 @@ onBeforeUnmount(() => {
           <p class="pause-number" aria-live="off">{{ chakraRemaining }}</p>
           <h2 id="chakra-title" tabindex="-1" data-dialog-title>Концентрація чакри</h2>
           <p>{{ chakraText }}</p>
+          <div class="chakra-progress" role="progressbar" aria-label="Минуло часу концентрації чакри" aria-valuemin="0" aria-valuemax="60" :aria-valuenow="chakraElapsed"><span :style="{ width: `${chakraElapsed / 60 * 100}%` }" /></div>
         </template>
         <template v-else-if="chakraStage === 'checkin'">
           <h2 id="chakra-title" tabindex="-1" data-dialog-title>Як зараз?</h2>
@@ -656,20 +674,34 @@ onBeforeUnmount(() => {
           <button class="quiet" type="button" @click="chakraStage = 'trigger'">Випити води</button>
           <button class="quiet" type="button" @click="chakraStage = 'trigger'">Пройтися</button>
         </template>
-        <template v-else>
+        <template v-else-if="chakraStage === 'trigger'">
           <h2 id="chakra-title" tabindex="-1" data-dialog-title>Що викликало бажання?</h2>
           <div class="chips">
-            <button v-for="(label, key) in triggerLabels" :key="key" type="button" @click="recordTrigger(key as Trigger)">
+            <button v-for="(label, key) in triggerLabels" :key="key" type="button" :aria-pressed="selectedTrigger === key" @click="chooseTrigger(key as Trigger)">
               {{ label }}
             </button>
           </div>
-          <button class="quiet" type="button" @click="recordTrigger(undefined)">Пропустити</button>
+          <button class="quiet" type="button" @click="closeChakra">Пропустити</button>
+        </template>
+        <template v-else-if="chakraStage === 'intensity'">
+          <h2 id="chakra-title" tabindex="-1" data-dialog-title>Наскільки сильним було бажання?</h2>
+          <div class="chips intensity-buttons" aria-label="Сила бажання">
+            <button v-for="value in 5" :key="value" type="button" :aria-pressed="selectedIntensity === value" @click="selectedIntensity = value; chakraStage = 'coping'">{{ value }}</button>
+          </div>
+          <button class="quiet" type="button" @click="selectedIntensity = undefined; chakraStage = 'coping'">Пропустити</button>
+        </template>
+        <template v-else>
+          <h2 id="chakra-title" tabindex="-1" data-dialog-title>Що трохи підтримало?</h2>
+          <div class="chips">
+            <button v-for="(label, key) in copingLabels" :key="key" type="button" :aria-pressed="selectedCoping === key" @click="selectedCoping = key as CopingMethod; recordTrigger()">{{ label }}</button>
+          </div>
+          <button class="quiet" type="button" @click="selectedCoping = undefined; recordTrigger()">Пропустити</button>
         </template>
         <article v-if="state?.settings.personalReason" class="reason-card craving-reason">
           <span>Твоя причина</span>
           <strong>{{ state.settings.personalReason }}</strong>
         </article>
-        <button v-if="chakraStage === 'running'" class="quiet" type="button" @click="closeChakra">Повернутися</button>
+        <button class="quiet" type="button" @click="closeChakra">Повернутися</button>
       </section>
     </div>
 
@@ -750,7 +782,7 @@ onBeforeUnmount(() => {
 }
 
 .character > img { opacity: .18; }
-.character-color { position: absolute; inset: 0; overflow: hidden; transition: clip-path .28s ease; }
+.character-color { position: absolute; inset: 0; --reveal: 0%; -webkit-mask-image: linear-gradient(to top, #000 0 calc(var(--reveal) - 24px), transparent calc(var(--reveal) + 24px)); mask-image: linear-gradient(to top, #000 0 calc(var(--reveal) - 24px), transparent calc(var(--reveal) + 24px)); transition: -webkit-mask-image .28s ease, mask-image .28s ease; }
 .character-color img { filter: none; opacity: 1; mix-blend-mode: normal; }
 .money-card, .reason-card, .insight, .settings-card, .journey-total { margin: 14px 0; padding: 14px 16px; border: 1px solid #e4d4b8; border-radius: 16px; background: #fffaf1; }
 .money-card span, .reason-card span, .journey-total span { display: block; color: #675f56; font-size: .85rem; }
@@ -774,6 +806,16 @@ onBeforeUnmount(() => {
 .journey-total small { display: block; margin-top: 10px; color: #675f56; }
 .new-path { width: 100%; margin-top: 14px; color: #80452c; }
 .practice { border-left: 3px solid #a95e2d; padding-left: 10px; }
+.practice p { margin: 6px 0 0; }
+.recovery-card { margin: 13px 0; text-align: left; border: 1px solid #d7c4a8; border-radius: 16px; background: #fffaf1; overflow: hidden; }
+.recovery-head { width: 100%; display: grid; gap: 2px; text-align: left; padding: 13px 15px; background: transparent; color: #2c2925; }
+.recovery-head span { font-size: .78rem; color: #86502b; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.recovery-head small { color: #675f56; }
+.recovery-timeline { border-top: 1px solid #e4d4b8; padding: 12px 15px; }
+.recovery-timeline article { padding: 9px 0 9px 13px; border-left: 3px solid #b9ae9e; }
+.recovery-timeline article.current { border-color: #bb6a2f; }.recovery-timeline article.completed { border-color: #47765d; }
+.recovery-timeline p { margin: 4px 0; color: #5d554b; font-size: .87rem; line-height: 1.45; }.recovery-timeline .disclaimer { font-size: .76rem; color: #766d62; margin-top: 12px; }.recovery-timeline a { color: #8d351f; font-weight: 750; font-size: .84rem; }
+.chakra-progress { height: 7px; background: #e8ddcb; border-radius: 99px; overflow: hidden; }.chakra-progress span { display: block; height: 100%; background: #3d83ad; transition: width .2s linear; }
 .pause .modal-card { text-align: center; }
 .chakra { display: block; color: #a94d26; font-size: 2rem; }
 .pause-number { font-size: 4rem; font-weight: 800; margin: 8px 0; }
@@ -788,6 +830,6 @@ onBeforeUnmount(() => {
 .modal-card { max-height: calc(100dvh - 40px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; }
 
 @media (prefers-reduced-motion: reduce) {
-  .character-color { transition: none; }
+  .character-color, .chakra-progress span { transition: none; }
 }
 </style>
